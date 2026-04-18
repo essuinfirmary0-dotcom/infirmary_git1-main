@@ -1150,18 +1150,34 @@ async function getAllowedAppointmentStatuses() {
   }
 }
 
-async function getInitialAppointmentStatus() {
-  const allowed = await getAllowedAppointmentStatuses();
-  if (allowed.includes('Waiting')) {
-    return 'Waiting';
+async function getAllAllowedAppointmentStatuses() {
+  try {
+    const definition = rows[0]?.definition || {};
+    const matches = [...definition.matchAll(/'([^']+)'/g)];
+    const statuses = matches.map((m) => m[1]).filter(Boolean);
+
+    return statuses.length ? statuses : ['Ongoing', 'Success', 'Cancelled'];
+  } catch {
+    return ['Ongoing', 'Success', 'Cancelled'];
   }
+}
+
+async function getInitialAppointmentStatus() {
+  const allowed = await getAllAllowedAppointmentStatuses();
+
   if (allowed.includes('Ongoing')) {
     return 'Ongoing';
   }
+
   if (allowed.includes('Success')) {
     return 'Success';
   }
-  return allowed[0] || 'Waiting';
+
+  if (allowed.includes('Cancelled')) {
+    return 'Cancelled';
+  }
+
+  return 'Ongoing';
 }
 
 app.post('/api/auth/login', async (req, res) => {
