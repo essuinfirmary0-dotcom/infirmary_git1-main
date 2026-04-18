@@ -3358,7 +3358,7 @@ async function runStartupMaintenance() {
 void runStartupMaintenance();
 setInterval(() => {
   void markMissedAppointmentsAsNotCompleted().catch((error) => {
-    console.error('Missed appointment sync failed:', error.message);
+console.error("Missed appointment sync failed:", error?.message, error?.stack);
   });
 }, 60 * 1000);
 
