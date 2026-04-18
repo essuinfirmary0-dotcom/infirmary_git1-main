@@ -1,0 +1,88 @@
+/* react-calendar custom styles */
+.react-calendar {
+  width: 100%;
+  background: white;
+  border: none;
+  font-family: inherit;
+}
+
+.react-calendar__navigation button {
+  min-width: 44px;
+  background: none;
+  font-size: 16px;
+  margin-top: 8px;
+  color: #0a6627;
+  font-weight: 600;
+}
+
+.react-calendar__navigation button:enabled:hover,
+.react-calendar__navigation button:enabled:focus {
+  background-color: #f8fafc;
+  border-radius: 8px;
+}
+
+.react-calendar__month-view__weekdays {
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: bold;
+  font-size: 0.75rem;
+  color: #64748b;
+  padding-bottom: 1rem;
+}
+
+.react-calendar__tile {
+  padding: 1.5em 0.5em;
+  background: none;
+  text-align: center;
+  line-height: 16px;
+  border-radius: 12px;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.react-calendar__tile:enabled:hover,
+.react-calendar__tile:enabled:focus {
+  background-color: #f0fdf4;
+  color: #0a6627;
+}
+
+.react-calendar__tile--now {
+  background: #f1f5f9;
+  font-weight: bold;
+}
+
+.react-calendar__tile--active {
+  background: #0a6627 !important;
+  color: white !important;
+}
+
+.react-calendar__tile--disabled {
+  background-color: #f8fafc;
+  color: #cbd5e1;
+}
+
+.react-calendar__month-view__days__day--neighboringMonth {
+  color: #e2e8f0;
+}
+
+.appointment-datepicker-popper {
+  z-index: 60;
+}
+
+.appointment-datepicker-calendar {
+  border-radius: 1.25rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.15);
+  font-family: inherit;
+}
+
+.appointment-datepicker-calendar .react-datepicker__day-names {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.appointment-datepicker-calendar .react-datepicker__day--selected,
+.appointment-datepicker-calendar .react-datepicker__day--keyboard-selected {
+  background-color: #0a6627;
+  color: white;
+}

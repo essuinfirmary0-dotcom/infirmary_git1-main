@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@import "./calendar.css";
+
+@theme {
+  --color-primary: #0a6627;
+  --color-primary-hover: #08521f;
+}
+
+@layer base {
+  html {
+    overflow-x: hidden;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+}

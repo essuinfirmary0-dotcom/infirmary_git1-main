@@ -1,0 +1,288 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- =====================================================
+-- DROP OLD TABLES
+-- =====================================================
+DROP TABLE IF EXISTS admin_activity_logs CASCADE;
+DROP TABLE IF EXISTS notifications CASCADE;
+DROP TABLE IF EXISTS queues CASCADE;
+DROP TABLE IF EXISTS medical_record_attachments CASCADE;
+DROP TABLE IF EXISTS medical_records CASCADE;
+DROP TABLE IF EXISTS consultation_logs CASCADE;
+DROP TABLE IF EXISTS password_reset_tokens CASCADE;
+DROP TABLE IF EXISTS appointments CASCADE;
+DROP TABLE IF EXISTS slot_definitions CASCADE;
+DROP TABLE IF EXISTS attendance_records CASCADE;
+DROP TABLE IF EXISTS faculties CASCADE;
+DROP TABLE IF EXISTS departments CASCADE;
+DROP TABLE IF EXISTS users_auth CASCADE;
+
+DROP SEQUENCE IF EXISTS student_number_seq CASCADE;
+DROP SEQUENCE IF EXISTS employee_number_seq CASCADE;
+
+CREATE SEQUENCE student_number_seq START 1;
+CREATE SEQUENCE employee_number_seq START 1;
+
+-- =====================================================
+-- DEPARTMENTS
+-- from attendance CSV / attendance schema
+-- =====================================================
+CREATE TABLE departments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    type text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- SHARED USERS TABLE
+-- merged version of attendance users + infirmary users_auth
+-- =====================================================
+CREATE TABLE users_auth (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- attendance-side user info
+    lastname text,
+    firstname text,
+    middle_initial text,
+    id_number text,
+    picture_url text,
+    role text,
+    registration_date date,
+    qr_code text,
+    department_program uuid REFERENCES departments(id) ON DELETE SET NULL,
+    qr_code_generated_at timestamptz,
+    status text DEFAULT 'active',
+    qr_data text,
+
+    -- infirmary-side account fields
+    user_type text,
+    email text UNIQUE,
+    address text,
+    phone text,
+    password_hash text,
+
+    -- optional school/employee numbering
+    student_number varchar UNIQUE DEFAULT ('NS-' || lpad(nextval('student_number_seq')::text, 5, '0')),
+    employee_number varchar UNIQUE DEFAULT ('EM-' || lpad(nextval('employee_number_seq')::text, 5, '0')),
+
+    college varchar,
+    program varchar,
+
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- FACULTIES
+-- imported from faculties_rows CSV
+-- =====================================================
+CREATE TABLE faculties (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    auth_user_id uuid,
+    faculty_id text UNIQUE,
+    email text UNIQUE,
+    first_name text,
+    last_name text,
+    middle_name text,
+    campus_id uuid,
+    department text,
+    college text,
+    position text,
+    photo_url text,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    contact_number text,
+    baccalaureate_degree text,
+    masters_degree text,
+    doctorate_degree text,
+    tor_diploma_url text,
+    professional_license text,
+    license_url text,
+    academic_rank text,
+    designation text,
+    password_changed_at timestamptz,
+    must_change_password boolean NOT NULL DEFAULT false,
+    program_head_id uuid,
+    department_id uuid REFERENCES departments(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- ATTENDANCE RECORDS
+-- from attendance CSV / attendance schema
+-- =====================================================
+CREATE TABLE attendance_records (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    scan_datetime timestamptz NOT NULL,
+    scan_picture_url text,
+    scan_status text,
+    display_message text,
+    kiosk_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- APPOINTMENT SLOT DEFINITIONS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE slot_definitions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    time_slot varchar NOT NULL UNIQUE,
+    max_capacity integer NOT NULL DEFAULT 50,
+    sort_order integer NOT NULL DEFAULT 0,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- APPOINTMENTS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE appointments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    appointment_code varchar NOT NULL UNIQUE,
+    patient_name varchar NOT NULL,
+    service varchar NOT NULL CHECK (service IN ('Dental', 'Medical', 'Nutrition')),
+    subcategory varchar NOT NULL,
+    purpose varchar NOT NULL,
+    appointment_date date NOT NULL,
+    time_slot varchar NOT NULL,
+    notes text,
+    status varchar NOT NULL DEFAULT 'Waiting'
+        CHECK (status IN ('Waiting', 'Ongoing', 'Completed', 'Not Completed')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    slot_definition_id uuid REFERENCES slot_definitions(id) ON DELETE SET NULL
+);
+
+-- =====================================================
+-- CONSULTATION LOGS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE consultation_logs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    recorded_by uuid NOT NULL REFERENCES users_auth(id) ON DELETE RESTRICT,
+    systolic integer NOT NULL,
+    diastolic integer NOT NULL,
+    notes text,
+    recorded_at timestamptz NOT NULL DEFAULT now(),
+    attachment_path text,
+    attachment_mime text
+);
+
+-- =====================================================
+-- MEDICAL RECORDS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE medical_records (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    recorded_by uuid NOT NULL REFERENCES users_auth(id) ON DELETE RESTRICT,
+    title varchar NOT NULL,
+    notes text,
+    recorded_at timestamptz NOT NULL DEFAULT now(),
+    attachment_path text,
+    attachment_mime text
+);
+
+CREATE TABLE medical_record_attachments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    record_id uuid NOT NULL REFERENCES medical_records(id) ON DELETE CASCADE,
+    attachment_path text NOT NULL,
+    attachment_mime text NOT NULL,
+    original_name text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- NOTIFICATIONS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE notifications (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    type varchar NOT NULL,
+    title varchar NOT NULL,
+    message text NOT NULL,
+    appointment_id uuid REFERENCES appointments(id) ON DELETE CASCADE,
+    read_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- PASSWORD RESET TOKENS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE password_reset_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    token_hash varchar NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- QUEUES
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE queues (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users_auth(id) ON DELETE CASCADE,
+    queue_number varchar NOT NULL,
+    appointment_id uuid REFERENCES appointments(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    status varchar NOT NULL DEFAULT 'Waiting'
+        CHECK (status IN ('Waiting', 'Serving', 'Done', 'Cancelled'))
+);
+
+-- =====================================================
+-- ADMIN ACTIVITY LOGS
+-- from infirmary schema
+-- =====================================================
+CREATE TABLE admin_activity_logs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_user_id uuid REFERENCES users_auth(id) ON DELETE SET NULL,
+    admin_user_name varchar NOT NULL,
+    action_type varchar NOT NULL,
+    message text NOT NULL,
+    changed_data jsonb,
+    target_type varchar,
+    target_id varchar,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =====================================================
+-- INDEXES
+-- =====================================================
+CREATE INDEX idx_users_auth_department_program ON users_auth(department_program);
+CREATE INDEX idx_users_auth_email ON users_auth(email);
+CREATE INDEX idx_users_auth_id_number ON users_auth(id_number);
+CREATE INDEX idx_attendance_records_user_id ON attendance_records(user_id);
+CREATE INDEX idx_attendance_records_scan_datetime ON attendance_records(scan_datetime);
+CREATE INDEX idx_appointments_user_id ON appointments(user_id);
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_queues_user_id ON queues(user_id);
+
+-- =====================================================
+-- UPDATED_AT TRIGGER
+-- =====================================================
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_auth_updated_at
+BEFORE UPDATE ON users_auth
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_appointments_updated_at
+BEFORE UPDATE ON appointments
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
