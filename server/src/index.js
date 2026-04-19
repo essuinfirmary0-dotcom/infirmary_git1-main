@@ -186,6 +186,8 @@ function mapManagedUserRow(user) {
 const DEFAULT_TIME_SLOTS = [
   { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 0 },
   { timeSlot: '1:00 PM - 4:00 PM', maxCapacity: 50, sortOrder: 1 },
+  { timeSlot: '4:00 PM - 7:00 PM', maxCapacity: 50, sortOrder: 2 },
+  { timeSlot: '7:00 PM - 11:00 PM', maxCapacity: 50, sortOrder: 3 },
 ];
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
