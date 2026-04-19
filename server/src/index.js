@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -12,11 +13,58 @@ const port = Number(process.env.PORT || 5000);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadsDir = path.resolve(__dirname, '../uploads');
+const isProduction = process.env.NODE_ENV === 'production';
+const sessionTtlMs = Math.max(Number(process.env.AUTH_TOKEN_TTL_MS || 7 * 24 * 60 * 60 * 1000), 5 * 60 * 1000);
+const authTokenSecret = String(process.env.AUTH_TOKEN_SECRET || process.env.JWT_SECRET || '').trim();
+const configuredAllowedOrigins = String(process.env.CORS_ORIGIN || process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const defaultDevOrigins = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+const supabaseUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const supabaseServiceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const supabaseStorageBucket = String(process.env.SUPABASE_STORAGE_BUCKET || '').trim();
+const supabaseSignedUrlTtlSeconds = Math.max(Number(process.env.SUPABASE_STORAGE_SIGNED_URL_TTL || 60 * 60), 60);
+const isSupabaseStorageConfigured = Boolean(supabaseUrl && supabaseServiceRoleKey && supabaseStorageBucket);
+const PASSWORD_HASH_PREFIX = 'scrypt';
+const PASSWORD_HASH_KEY_LENGTH = 64;
+const PASSWORD_SALT_BYTES = 16;
 
 fs.mkdirSync(uploadsDir, { recursive: true });
 
+if (isProduction && !authTokenSecret) {
+  throw new Error('AUTH_TOKEN_SECRET is required in production.');
+}
+
+function isOriginAllowed(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  if (configuredAllowedOrigins.length > 0) {
+    return configuredAllowedOrigins.includes(origin);
+  }
+
+  return !isProduction || defaultDevOrigins.has(origin);
+}
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const requestOrigin = String(req.headers.origin || '').trim();
+  if (requestOrigin && !isOriginAllowed(requestOrigin)) {
+    return res.status(403).json({ message: 'This origin is not allowed to access the API.' });
+  }
+
+  if (requestOrigin && isOriginAllowed(requestOrigin)) {
+    res.header('Access-Control-Allow-Origin', requestOrigin);
+    res.header('Vary', 'Origin');
+  }
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
 
@@ -28,7 +76,9 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '25mb' }));
-app.use('/uploads', express.static(uploadsDir));
+if (!isSupabaseStorageConfigured) {
+  app.use('/uploads', express.static(uploadsDir));
+}
 
 function normalizeIdentifier(value) {
   return String(value || '').trim();
@@ -42,15 +92,67 @@ function getDefaultPasswordForUser(user) {
   return normalizeCredential(user?.student_number || user?.employee_number || user?.id_number || '');
 }
 
-function doesPasswordMatch(user, candidatePassword) {
+function timingSafeCompare(a, b) {
+  const left = Buffer.from(String(a || ''), 'utf8');
+  const right = Buffer.from(String(b || ''), 'utf8');
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(left, right);
+}
+
+function isStoredPasswordHash(value) {
+  return String(value || '').startsWith(`${PASSWORD_HASH_PREFIX}$`);
+}
+
+function hashPassword(password) {
+  const normalizedPassword = normalizeCredential(password);
+  if (!normalizedPassword) {
+    throw new Error('Password is required.');
+  }
+
+  const salt = crypto.randomBytes(PASSWORD_SALT_BYTES).toString('hex');
+  const derivedKey = crypto.scryptSync(normalizedPassword, salt, PASSWORD_HASH_KEY_LENGTH).toString('hex');
+  return `${PASSWORD_HASH_PREFIX}$${salt}$${derivedKey}`;
+}
+
+function verifyHashedPassword(password, storedHash) {
+  const [prefix, salt, expectedHash] = String(storedHash || '').split('$');
+  if (prefix !== PASSWORD_HASH_PREFIX || !salt || !expectedHash) {
+    return false;
+  }
+
+  const computedHash = crypto.scryptSync(normalizeCredential(password), salt, PASSWORD_HASH_KEY_LENGTH).toString('hex');
+  return timingSafeCompare(expectedHash, computedHash);
+}
+
+async function doesPasswordMatch(user, candidatePassword) {
   const providedPassword = normalizeCredential(candidatePassword);
   const storedPassword = normalizeCredential(user?.password_hash);
 
   if (storedPassword) {
-    return storedPassword === providedPassword;
+    if (isStoredPasswordHash(storedPassword)) {
+      return {
+        matches: verifyHashedPassword(providedPassword, storedPassword),
+        shouldUpgradeHash: false,
+      };
+    }
+
+    const matches = timingSafeCompare(storedPassword, providedPassword);
+    return {
+      matches,
+      shouldUpgradeHash: matches,
+    };
   }
 
-  return getDefaultPasswordForUser(user) === providedPassword;
+  const fallbackPassword = getDefaultPasswordForUser(user);
+  const matches = Boolean(fallbackPassword) && timingSafeCompare(fallbackPassword, providedPassword);
+  return {
+    matches,
+    shouldUpgradeHash: matches,
+  };
 }
 
 function getEffectiveUserType(user) {
@@ -89,10 +191,44 @@ let cachedAppointmentStatuses = null;
 
 function parseAuthToken(token) {
   try {
-    return JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
+    const [encodedPayload, providedSignature] = String(token || '').split('.');
+    if (!encodedPayload || !providedSignature || !authTokenSecret) {
+      return null;
+    }
+
+    const expectedSignature = crypto.createHmac('sha256', authTokenSecret).update(encodedPayload).digest('base64url');
+    if (!timingSafeCompare(providedSignature, expectedSignature)) {
+      return null;
+    }
+
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+    if (!payload?.sub || !Number.isFinite(Number(payload?.exp)) || Number(payload.exp) < Date.now()) {
+      return null;
+    }
+
+    return payload;
   } catch {
     return null;
   }
+}
+
+function createSessionToken(user, loginIdentifier = '') {
+  if (!authTokenSecret) {
+    throw new Error('AUTH_TOKEN_SECRET is not configured.');
+  }
+
+  const issuedAt = Date.now();
+  const payload = {
+    sub: user.id,
+    studentId: user.id_number || user.student_number || user.employee_number || loginIdentifier || null,
+    userType: getEffectiveUserType(user) || 'student',
+    iat: issuedAt,
+    exp: issuedAt + sessionTtlMs,
+    ver: 1,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', authTokenSecret).update(encodedPayload).digest('base64url');
+  return `${encodedPayload}.${signature}`;
 }
 
 async function loadAuthenticatedUser(req, res, next) {
@@ -146,6 +282,7 @@ async function loadAuthenticatedUser(req, res, next) {
       return res.status(403).json({ message: 'This account is blocked. Please contact the super admin.' });
     }
 
+    req.authTokenPayload = payload;
     req.authUser = rows[0];
     return next();
   } catch (error) {
@@ -488,7 +625,96 @@ function extensionFromMime(mime) {
   return '';
 }
 
-async function saveDataUrlAttachment({ dataUrl, mimeType, originalName }) {
+function buildStoredFileName(originalName, extension) {
+  const rawBaseName = path.basename(String(originalName || '')).trim();
+  const rawNameWithoutExtension = rawBaseName ? rawBaseName.replace(/\.[^/.]+$/, '') : 'file';
+  const safeName = rawNameWithoutExtension.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'file';
+  const normalizedExtension = extension || path.extname(rawBaseName) || '';
+  return `${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeName}${normalizedExtension}`;
+}
+
+function encodeSupabaseStoragePath(storagePath) {
+  return String(storagePath || '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+async function uploadBufferToSupabaseStorage({ buffer, storagePath, mimeType }) {
+  const response = await fetch(
+    `${supabaseUrl}/storage/v1/object/${encodeURIComponent(supabaseStorageBucket)}/${encodeSupabaseStoragePath(storagePath)}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        apikey: supabaseServiceRoleKey,
+        'Content-Type': mimeType || 'application/octet-stream',
+        'x-upsert': 'true',
+      },
+      body: buffer,
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Supabase Storage upload failed (${response.status})${errorText ? `: ${errorText}` : ''}`);
+  }
+}
+
+async function createSupabaseSignedUrl(storagePath) {
+  if (!isSupabaseStorageConfigured || !storagePath) {
+    return null;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/storage/v1/object/sign/${encodeURIComponent(supabaseStorageBucket)}/${encodeSupabaseStoragePath(storagePath)}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        apikey: supabaseServiceRoleKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ expiresIn: supabaseSignedUrlTtlSeconds }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Failed to create signed attachment URL (${response.status})${errorText ? `: ${errorText}` : ''}`);
+  }
+
+  const data = await response.json().catch(() => null);
+  return data?.signedURL ? `${supabaseUrl}/storage/v1${data.signedURL}` : null;
+}
+
+async function appendAttachmentUrl(attachment) {
+  if (!attachment?.attachmentPath) {
+    return {
+      ...attachment,
+      attachmentUrl: null,
+    };
+  }
+
+  if (!isSupabaseStorageConfigured) {
+    return {
+      ...attachment,
+      attachmentUrl: null,
+    };
+  }
+
+  return {
+    ...attachment,
+    attachmentUrl: await createSupabaseSignedUrl(attachment.attachmentPath),
+  };
+}
+
+async function appendAttachmentUrls(attachments = []) {
+  return Promise.all((attachments || []).map((attachment) => appendAttachmentUrl(attachment)));
+}
+
+async function saveDataUrlAttachment({ dataUrl, mimeType, originalName, storageCategory = 'attachments' }) {
   const match = String(dataUrl || '').match(/^data:(.+?);base64,(.+)$/);
   if (!match) {
     throw new Error('Invalid attachment payload.');
@@ -496,10 +722,29 @@ async function saveDataUrlAttachment({ dataUrl, mimeType, originalName }) {
 
   const detectedMime = match[1] || mimeType || 'application/octet-stream';
   const extension = extensionFromMime(detectedMime) || path.extname(originalName || '') || '';
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${extension}`;
-  const absolutePath = path.join(uploadsDir, fileName);
+  const fileName = buildStoredFileName(originalName, extension);
   const buffer = Buffer.from(match[2], 'base64');
 
+  if (isSupabaseStorageConfigured) {
+    const storagePath = `${storageCategory}/${new Date().toISOString().slice(0, 10)}/${fileName}`;
+    await uploadBufferToSupabaseStorage({
+      buffer,
+      storagePath,
+      mimeType: detectedMime,
+    });
+
+    return {
+      attachmentPath: storagePath,
+      attachmentMime: detectedMime,
+      originalName: originalName || fileName,
+    };
+  }
+
+  if (isProduction) {
+    throw new Error('Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.');
+  }
+
+  const absolutePath = path.join(uploadsDir, fileName);
   await fs.promises.writeFile(absolutePath, buffer);
 
   return {
@@ -583,6 +828,7 @@ async function replaceAppointmentAttachments(client, appointmentId, attachments 
       dataUrl: attachment.dataUrl,
       mimeType: attachment.type,
       originalName: attachment.name,
+      storageCategory: 'appointments',
     });
 
     await client.query(
@@ -910,6 +1156,23 @@ function ensureSuperAdmin(req, res) {
   return true;
 }
 
+function ensureAdmin(req, res, message = 'Only admins can access this resource.') {
+  if (!isAdminUserType(getEffectiveUserType(req.authUser))) {
+    res.status(403).json({ message });
+    return false;
+  }
+  return true;
+}
+
+function ensureSelfOrAdmin(req, res, targetUserId, message = 'You are not authorized to access this resource.') {
+  if (req.authUser.id === targetUserId || isAdminUserType(getEffectiveUserType(req.authUser))) {
+    return true;
+  }
+
+  res.status(403).json({ message });
+  return false;
+}
+
 async function getSlotDefinitions() {
   const { rows } = await pool.query(
     `
@@ -1227,11 +1490,11 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = rows[0];
 
-      if (!user) {
-        return res.status(401).json({
+    if (!user) {
+      return res.status(401).json({
         message: 'Invalid ID or password.',
-        });
-      }
+      });
+    }
 
     if (String(user.status || '').toLowerCase() === 'blocked') {
       return res.status(403).json({
@@ -1239,7 +1502,7 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    const passwordMatches = doesPasswordMatch(user, password);
+    const { matches: passwordMatches, shouldUpgradeHash } = await doesPasswordMatch(user, password);
 
     if (!passwordMatches) {
       return res.status(401).json({
@@ -1247,14 +1510,20 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    const tokenPayload = {
-      sub: user.id,
-      studentId: user.id_number || user.student_number || studentId,
-      userType: user.user_type || user.role || 'student',
-      ts: Date.now(),
-    };
+    if (shouldUpgradeHash && getEffectiveUserType(user) !== 'guest') {
+      const nextPasswordHash = hashPassword(password);
+      await pool.query(
+        `
+          UPDATE public.users_auth
+          SET password_hash = $2
+          WHERE id = $1
+        `,
+        [user.id, nextPasswordHash],
+      );
+      user.password_hash = nextPasswordHash;
+    }
 
-    const token = Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
+    const token = createSessionToken(user, studentId);
 
     await createAdminActivityLog({
       adminUserId: user.id,
@@ -1327,13 +1596,7 @@ app.post('/api/auth/guest', async (_req, res) => {
     );
 
     const guestUser = rows[0];
-    const tokenPayload = {
-      sub: guestUser.id,
-      studentId: guestIdentifier,
-      userType: 'guest',
-      ts: Date.now(),
-    };
-    const token = Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
+    const token = createSessionToken(guestUser, guestIdentifier);
 
     return res.status(201).json({
       token,
@@ -1378,6 +1641,7 @@ app.post('/api/admin/users', loadAuthenticatedUser, async (req, res) => {
   }
 
   try {
+    const passwordHash = hashPassword(password);
     const { rows } = await pool.query(
       `
         INSERT INTO public.users_auth (
@@ -1424,7 +1688,7 @@ app.post('/api/admin/users', loadAuthenticatedUser, async (req, res) => {
         email,
         address,
         phone,
-        password,
+        passwordHash,
       ],
     );
 
@@ -1553,7 +1817,7 @@ app.patch('/api/admin/users/:id', loadAuthenticatedUser, async (req, res) => {
       return res.status(403).json({ message: 'Super admin accounts cannot be edited from this page.' });
     }
 
-    const passwordValue = password ? password : null;
+    const passwordValue = password ? hashPassword(password) : null;
     const { rows } = await pool.query(
       `
         UPDATE public.users_auth
@@ -2083,20 +2347,21 @@ app.patch('/api/auth/password', loadAuthenticatedUser, async (req, res) => {
     return res.status(400).json({ message: 'New password must be at least 6 characters long.' });
   }
 
-  const currentMatches = doesPasswordMatch(req.authUser, currentPassword);
+  const { matches: currentMatches } = await doesPasswordMatch(req.authUser, currentPassword);
 
   if (!currentMatches) {
     return res.status(400).json({ message: 'Current password is incorrect.' });
   }
 
   try {
+    const nextPasswordHash = hashPassword(newPassword);
     await pool.query(
       `
         UPDATE public.users_auth
         SET password_hash = $2
         WHERE id = $1
       `,
-      [req.authUser.id, newPassword],
+      [req.authUser.id, nextPasswordHash],
     );
 
     return res.json({
@@ -2547,8 +2812,27 @@ app.get('/api/appointments/:id/attachments', loadAuthenticatedUser, async (req, 
   }
 
   try {
+    const { rows } = await pool.query(
+      `
+        SELECT id, user_id
+        FROM public.appointments
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [id],
+    );
+    const appointment = rows[0];
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found.' });
+    }
+
+    if (!ensureSelfOrAdmin(req, res, appointment.user_id, 'You are not authorized to view these appointment attachments.')) {
+      return;
+    }
+
     const attachments = await getAppointmentAttachments(id);
-    return res.json({ attachments });
+    return res.json({ attachments: await appendAttachmentUrls(attachments) });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load appointment attachments.', error: error.message });
   }
@@ -2574,6 +2858,10 @@ app.get('/api/appointments', loadAuthenticatedUser, async (req, res) => {
 });
 
 app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can view all appointments.')) {
+    return;
+  }
+
   try {
     await markMissedAppointmentsAsNotCompleted();
     const { rows } = await pool.query(
@@ -2591,6 +2879,10 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
 });
 
 app.get('/api/consultations/patients', loadAuthenticatedUser, async (_req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can view consultation patients.')) {
+    return;
+  }
+
   try {
     const { rows } = await pool.query(
       `
@@ -2613,6 +2905,9 @@ app.get('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, re
   if (!userId) {
     return res.status(400).json({ message: 'User id is required.' });
   }
+  if (!ensureSelfOrAdmin(req, res, userId, 'You are not authorized to view these consultation logs.')) {
+    return;
+  }
 
   try {
     const { rows } = await pool.query(
@@ -2625,25 +2920,41 @@ app.get('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, re
       [userId],
     );
 
-    return res.json(
-      rows.map((row) => ({
-        id: row.id,
-        userId: row.user_id,
-        recordedBy: row.recorded_by,
-        systolic: row.systolic,
-        diastolic: row.diastolic,
-        notes: row.notes || '',
-        recordedAt: row.recorded_at,
-        attachmentPath: row.attachment_path || null,
-        attachmentMime: row.attachment_mime || null,
-      })),
+    const logs = await Promise.all(
+      rows.map(async (row) => {
+        const attachment = row.attachment_path
+          ? await appendAttachmentUrl({
+              attachmentPath: row.attachment_path,
+              attachmentMime: row.attachment_mime,
+            })
+          : { attachmentUrl: null };
+
+        return {
+          id: row.id,
+          userId: row.user_id,
+          recordedBy: row.recorded_by,
+          systolic: row.systolic,
+          diastolic: row.diastolic,
+          notes: row.notes || '',
+          recordedAt: row.recorded_at,
+          attachmentPath: row.attachment_path || null,
+          attachmentMime: row.attachment_mime || null,
+          attachmentUrl: attachment.attachmentUrl || null,
+        };
+      }),
     );
+
+    return res.json(logs);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load consultation logs.', error: error.message });
   }
 });
 
 app.post('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can create consultation logs.')) {
+    return;
+  }
+
   const userId = normalizeIdentifier(req.params?.userId);
   const systolic = Number(req.body?.systolic);
   const diastolic = Number(req.body?.diastolic);
@@ -2679,6 +2990,13 @@ app.post('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, r
       targetId: rows[0]?.id || null,
     });
 
+    const createdAttachment = rows[0].attachment_path
+      ? await appendAttachmentUrl({
+          attachmentPath: rows[0].attachment_path,
+          attachmentMime: rows[0].attachment_mime,
+        })
+      : { attachmentUrl: null };
+
     return res.status(201).json({
       id: rows[0].id,
       userId: rows[0].user_id,
@@ -2689,6 +3007,7 @@ app.post('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, r
       recordedAt: rows[0].recorded_at,
       attachmentPath: rows[0].attachment_path || null,
       attachmentMime: rows[0].attachment_mime || null,
+      attachmentUrl: createdAttachment.attachmentUrl || null,
     });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to save consultation log.', error: error.message });
@@ -2696,6 +3015,10 @@ app.post('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, r
 });
 
 app.get('/api/medical-records/patients', loadAuthenticatedUser, async (_req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can view medical record patients.')) {
+    return;
+  }
+
   try {
     const { rows } = await pool.query(
       `
@@ -2717,6 +3040,9 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
 
   if (!userId) {
     return res.status(400).json({ message: 'User id is required.' });
+  }
+  if (!ensureSelfOrAdmin(req, res, userId, 'You are not authorized to view these medical records.')) {
+    return;
   }
 
   try {
@@ -2781,13 +3107,35 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
       }
     });
 
-    return res.json(Array.from(byRecord.values()));
+    const records = await Promise.all(
+      Array.from(byRecord.values()).map(async (record) => {
+        const attachments = await appendAttachmentUrls(record.attachments || []);
+        const primaryAttachment = record.attachmentPath
+          ? await appendAttachmentUrl({
+              attachmentPath: record.attachmentPath,
+              attachmentMime: record.attachmentMime,
+            })
+          : { attachmentUrl: null };
+
+        return {
+          ...record,
+          attachmentUrl: primaryAttachment.attachmentUrl || null,
+          attachments,
+        };
+      }),
+    );
+
+    return res.json(records);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load medical records.', error: error.message });
   }
 });
 
 app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can create medical records.')) {
+    return;
+  }
+
   const userId = normalizeIdentifier(req.params?.userId);
   const title = normalizeIdentifier(req.body?.title);
   const notes = normalizeIdentifier(req.body?.notes);
@@ -2835,6 +3183,7 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
           dataUrl: attachment.dataUrl,
           mimeType: attachment.type,
           originalName: attachment.name,
+          storageCategory: 'medical-records',
         });
         savedAttachments.push(saved);
       }
@@ -2965,6 +3314,14 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
       targetId: rows[0]?.id || null,
     });
 
+    const responseAttachments = await appendAttachmentUrls(savedAttachments);
+    const primaryAttachmentAsset = rows[0].attachment_path
+      ? await appendAttachmentUrl({
+          attachmentPath: rows[0].attachment_path,
+          attachmentMime: rows[0].attachment_mime,
+        })
+      : { attachmentUrl: null };
+
     return res.status(201).json({
       id: rows[0].id,
       userId: rows[0].user_id,
@@ -2974,11 +3331,12 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
       recordedAt: rows[0].recorded_at,
       attachmentPath: rows[0].attachment_path || null,
       attachmentMime: rows[0].attachment_mime || null,
+      attachmentUrl: primaryAttachmentAsset.attachmentUrl || null,
       appointmentId: rows[0].appointment_id || null,
       queueId: rows[0].queue_id || null,
       recordType: rows[0].record_type || null,
       purpose: rows[0].purpose || null,
-      attachments: savedAttachments,
+      attachments: responseAttachments,
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2989,6 +3347,10 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
 });
 
 app.patch('/api/appointments/:id/status', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can update appointment status.')) {
+    return;
+  }
+
   const status = normalizeIdentifier(req.body?.status);
   const id = normalizeIdentifier(req.params?.id);
 
@@ -3082,6 +3444,10 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
 });
 
 app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can view queue data.')) {
+    return;
+  }
+
   const status = normalizeIdentifier(req.query?.status);
   const date = normalizeIdentifier(req.query?.date);
 
@@ -3141,6 +3507,10 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
 });
 
 app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
+  if (!ensureAdmin(req, res, 'Only admins can update queue status.')) {
+    return;
+  }
+
   const id = normalizeIdentifier(req.params?.id);
   const nextStatus = toDatabaseQueueStatus(normalizeIdentifier(req.body?.status));
   const reason = normalizeIdentifier(req.body?.reason);

@@ -81,6 +81,12 @@ function getAttachmentLabel(attachment) {
   return attachment?.requirementLabel || 'Uploaded file';
 }
 
+function getAttachmentUrl(attachment) {
+  if (attachment?.attachmentUrl) return attachment.attachmentUrl;
+  if (!attachment?.attachmentPath) return '';
+  return `${baseURL}/uploads/${attachment.attachmentPath}`;
+}
+
 function isCertificateRecord(record) {
   const combined = `${record?.title || ''} ${record?.recordType || ''}`.toLowerCase();
   return combined.includes('certificate') || combined.includes('certification');
@@ -259,6 +265,7 @@ export const AdminRecordsPage = () => {
               id: null,
               attachmentPath: selectedRecordTile.attachmentPath,
               attachmentMime: selectedRecordTile.attachmentMime,
+              attachmentUrl: selectedRecordTile.attachmentUrl || null,
             },
           ]
         : [];
@@ -296,11 +303,11 @@ export const AdminRecordsPage = () => {
               >
                 <button
                   type="button"
-                  onClick={() => setPreviewImageUrl(`${baseURL}/uploads/${file.attachmentPath}`)}
+                  onClick={() => setPreviewImageUrl(getAttachmentUrl(file))}
                   className="relative aspect-square w-full overflow-hidden bg-slate-50 transition-all hover:border-primary/30"
                 >
                   <img
-                    src={`${baseURL}/uploads/${file.attachmentPath}`}
+                    src={getAttachmentUrl(file)}
                     alt={file.originalName || 'Requirement file'}
                     className="w-full h-full object-cover"
                   />
@@ -320,7 +327,7 @@ export const AdminRecordsPage = () => {
           {appointmentAttachmentItems.map((file, i) => (
             <a
               key={file.id || `${file.attachmentPath}-${i}`}
-              href={`${baseURL}/uploads/${file.attachmentPath}`}
+              href={getAttachmentUrl(file)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-2.5 transition-all hover:border-primary/30 hover:bg-white"
@@ -623,7 +630,10 @@ export const AdminRecordsPage = () => {
                             attachmentMime: record.attachmentMime || record.attachments?.[0]?.attachmentMime,
                           }) ? (
                             <img
-                              src={`${baseURL}/uploads/${record.attachmentPath || record.attachments?.[0]?.attachmentPath}`}
+                              src={getAttachmentUrl({
+                                attachmentPath: record.attachmentPath || record.attachments?.[0]?.attachmentPath,
+                                attachmentUrl: record.attachmentUrl || record.attachments?.[0]?.attachmentUrl || null,
+                              })}
                               alt=""
                               className="w-full h-full object-cover"
                             />
@@ -699,7 +709,7 @@ export const AdminRecordsPage = () => {
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Attachments</p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {selectedRecordAttachments.map((att, i) => {
-                          const attachmentUrl = `${baseURL}/uploads/${att.attachmentPath}`;
+                          const attachmentUrl = getAttachmentUrl(att);
                           const isImage = isImageAttachment(att);
                           return (
                             <div
