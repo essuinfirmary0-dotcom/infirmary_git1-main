@@ -187,6 +187,7 @@ const DEFAULT_TIME_SLOTS = [
   { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 0 },
   { timeSlot: '1:00 PM - 4:00 PM', maxCapacity: 50, sortOrder: 1 },
 ];
+const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
 
 function parseAuthToken(token) {
@@ -1174,6 +1175,8 @@ function ensureSelfOrAdmin(req, res, targetUserId, message = 'You are not author
 }
 
 async function getSlotDefinitions() {
+  await syncDefaultSlotDefinitions();
+
   const { rows } = await pool.query(
     `
       SELECT id, time_slot, max_capacity, sort_order
@@ -1183,36 +1186,19 @@ async function getSlotDefinitions() {
     `,
   );
 
-  const existingSlots = rows.map((row) => ({
-    id: row.id,
-    timeSlot: formatTimeSlotLabel(row.time_slot),
-    maxCapacity: row.max_capacity,
-    sortOrder: row.sort_order,
-  }));
+  const rowsByTimeSlot = new Map(
+    rows.map((row) => [formatTimeSlotLabel(row.time_slot), row]),
+  );
 
-  if (existingSlots.length > 0) {
-    const mergedByTimeSlot = new Map(existingSlots.map((slot) => [slot.timeSlot, slot]));
-    for (const slot of DEFAULT_TIME_SLOTS) {
-      if (!mergedByTimeSlot.has(slot.timeSlot)) {
-        mergedByTimeSlot.set(slot.timeSlot, { ...slot });
-      }
-    }
-
-    return [...mergedByTimeSlot.values()]
-      .sort((a, b) => {
-        const sortDifference = (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
-        if (sortDifference !== 0) return sortDifference;
-        return String(a.timeSlot).localeCompare(String(b.timeSlot));
-      })
-      .map((slot) => ({
-        id: slot.id || null,
-        timeSlot: slot.timeSlot,
-        maxCapacity: slot.maxCapacity,
-        sortOrder: slot.sortOrder,
-      }));
-  }
-
-  return DEFAULT_TIME_SLOTS.map((slot) => ({ ...slot }));
+  return DEFAULT_TIME_SLOTS.map((slot) => {
+    const existingRow = rowsByTimeSlot.get(slot.timeSlot);
+    return {
+      id: existingRow?.id || null,
+      timeSlot: slot.timeSlot,
+      maxCapacity: existingRow?.max_capacity ?? slot.maxCapacity,
+      sortOrder: existingRow?.sort_order ?? slot.sortOrder,
+    };
+  });
 }
 
 function buildMissedAppointmentNote(existingNotes, timeSlot, dateLabel = 'today') {
@@ -1311,19 +1297,24 @@ async function markMissedAppointmentsAsNotCompleted() {
 
 async function getOrCreateSlotDefinition(timeSlot) {
   const normalizedTimeSlot = formatTimeSlotLabel(normalizeIdentifier(timeSlot));
-  if (!normalizedTimeSlot) {
+  if (!normalizedTimeSlot || !DEFAULT_TIME_SLOT_MAP.has(normalizedTimeSlot)) {
     return null;
   }
+
+  await syncDefaultSlotDefinitions();
 
   const existing = await pool.query(
     `
       SELECT id, time_slot, max_capacity, sort_order
       FROM public.slot_definitions
-      ORDER BY sort_order ASC, time_slot ASC
+      WHERE is_active = true
+        AND time_slot = $1
+      LIMIT 1
     `,
+    [normalizedTimeSlot],
   );
 
-  const matchingRow = existing.rows.find((row) => formatTimeSlotLabel(row.time_slot) === normalizedTimeSlot);
+  const matchingRow = existing.rows[0];
 
   if (matchingRow) {
     return {
@@ -1334,7 +1325,7 @@ async function getOrCreateSlotDefinition(timeSlot) {
     };
   }
 
-  const fallback = DEFAULT_TIME_SLOTS.find((slot) => slot.timeSlot === normalizedTimeSlot);
+  const fallback = DEFAULT_TIME_SLOT_MAP.get(normalizedTimeSlot);
   const created = await pool.query(
     `
       INSERT INTO public.slot_definitions (time_slot, max_capacity, sort_order, is_active)
@@ -1354,6 +1345,71 @@ async function getOrCreateSlotDefinition(timeSlot) {
     maxCapacity: created.rows[0].max_capacity,
     sortOrder: created.rows[0].sort_order,
   };
+}
+
+async function syncDefaultSlotDefinitions() {
+  const { rows } = await pool.query(
+    `
+      SELECT id, time_slot, max_capacity, sort_order, is_active
+      FROM public.slot_definitions
+      ORDER BY sort_order ASC, time_slot ASC
+    `,
+  );
+
+  const seenAllowedSlots = new Set();
+  for (const row of rows) {
+    const normalizedTimeSlot = formatTimeSlotLabel(row.time_slot);
+    const defaultSlot = DEFAULT_TIME_SLOT_MAP.get(normalizedTimeSlot);
+
+    if (!defaultSlot) {
+      if (row.is_active) {
+        await pool.query(
+          `
+            UPDATE public.slot_definitions
+            SET is_active = false
+            WHERE id = $1
+          `,
+          [row.id],
+        );
+      }
+      continue;
+    }
+
+    seenAllowedSlots.add(defaultSlot.timeSlot);
+    const needsUpdate =
+      !row.is_active ||
+      row.time_slot !== defaultSlot.timeSlot ||
+      row.max_capacity !== defaultSlot.maxCapacity ||
+      row.sort_order !== defaultSlot.sortOrder;
+
+    if (needsUpdate) {
+      await pool.query(
+        `
+          UPDATE public.slot_definitions
+          SET time_slot = $2,
+              max_capacity = $3,
+              sort_order = $4,
+              is_active = true
+          WHERE id = $1
+        `,
+        [row.id, defaultSlot.timeSlot, defaultSlot.maxCapacity, defaultSlot.sortOrder],
+      );
+    }
+  }
+
+  for (const defaultSlot of DEFAULT_TIME_SLOTS) {
+    if (seenAllowedSlots.has(defaultSlot.timeSlot)) {
+      continue;
+    }
+
+    await pool.query(
+      `
+        INSERT INTO public.slot_definitions (time_slot, max_capacity, sort_order, is_active)
+        VALUES ($1, $2, $3, true)
+      `,
+      [defaultSlot.timeSlot, defaultSlot.maxCapacity, defaultSlot.sortOrder],
+    );
+  }
 }
 
 async function generateAppointmentCode() {
@@ -2612,6 +2668,9 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
     const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
+    if (!slotDefinition) {
+      return res.status(400).json({ message: 'Selected time slot is no longer available.' });
+    }
     const { rows: bookedRows } = await pool.query(
       `
         SELECT time_slot, COUNT(*)::int AS booked_count
@@ -2738,6 +2797,9 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
     }
 
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
+    if (!slotDefinition) {
+      return res.status(400).json({ message: 'Selected time slot is no longer available.' });
+    }
     const { rows: bookedRows } = await pool.query(
       `
         SELECT time_slot, COUNT(*)::int AS booked_count
@@ -3730,6 +3792,9 @@ app.get('/api/health', async (_req, res) => {
 
 async function runStartupMaintenance() {
   try {
+    console.log('Running syncDefaultSlotDefinitions...');
+    await syncDefaultSlotDefinitions();
+
     console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();
 
