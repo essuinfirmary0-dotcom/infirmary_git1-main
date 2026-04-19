@@ -1,4 +1,4 @@
-import { api } from './api';
+import api from './api';
 
 const resolveAttachmentSource = (payload = {}) => {
   const attachmentFiles = Array.isArray(payload.attachmentFiles) ? payload.attachmentFiles : [];
