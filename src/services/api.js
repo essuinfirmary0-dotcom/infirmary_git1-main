@@ -1,15 +1,12 @@
 import axios from 'axios';
 
-export const baseURL = import.meta.env.DEV
-  ? 'http://localhost:5000'
-  : import.meta.env.VITE_BASE_URL;
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://discerning-exploration-production-8d2a.up.railway.app';
 
-export const api = axios.create({
-  baseURL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+const api = axios.create({
+  baseURL: BASE_URL,
 });
+
+export default api;
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('authToken');
@@ -18,4 +15,3 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
-

@@ -84,8 +84,6 @@ function mapManagedUserRow(user) {
 const DEFAULT_TIME_SLOTS = [
   { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 0 },
   { timeSlot: '1:00 PM - 4:00 PM', maxCapacity: 50, sortOrder: 1 },
-  { timeSlot: '4:00 PM - 7:00 PM', maxCapacity: 50, sortOrder: 2 },
-  { timeSlot: '7:00 PM - 11:00 PM', maxCapacity: 50, sortOrder: 3 },
 ];
 let cachedAppointmentStatuses = null;
 
@@ -3362,12 +3360,21 @@ app.get('/api/health', async (_req, res) => {
 
 async function runStartupMaintenance() {
   try {
+    console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();
+
+    console.log('Running ensureMedicalRecordAttachmentLabels...');
     await ensureMedicalRecordAttachmentLabels();
+
+    console.log('Running backfillMissingQueues...');
     await backfillMissingQueues();
+
+    console.log('Running markMissedAppointmentsAsNotCompleted...');
     await markMissedAppointmentsAsNotCompleted();
+
+    console.log('Startup maintenance finished.');
   } catch (error) {
-    console.error('Startup maintenance failed:', error.message);
+    console.error('Startup maintenance failed:', error);
   }
 }
 

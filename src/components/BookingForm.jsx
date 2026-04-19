@@ -36,7 +36,7 @@ const guestServices = [
   { id: 'Medical', label: 'Medical', description: 'Guest medical appointment booking' },
 ];
 
-const FIXED_SUBCATEGORY = 'Consultation';
+const SUBCATEGORY_OPTIONS = ['Consultation', 'Certification'];
 
 const commonPurposesByService = {
   Dental: ['Tooth Extraction'],
@@ -49,7 +49,7 @@ const guestPurposesByService = {
 };
 
 const MAX_SLOTS = 50;
-const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM', '4:00 PM - 7:00 PM', '7:00 PM - 11:00 PM'];
+const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM',];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
 
 const isInfirmaryClosedOnDate = (d) => {
@@ -342,7 +342,7 @@ const initialFormData = (user) => ({
   patientName: user?.name || '',
   course: user?.program || '',
   service: user?.userType === 'guest' ? 'Medical' : '',
-  subcategory: FIXED_SUBCATEGORY,
+  subcategory: '',
   purpose: '',
   timeSlot: '',
   notes: '',
@@ -720,7 +720,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                     key={s.id}
                     type="button"
                     onClick={() => {
-                      setFormData({ ...formData, service: s.id, subcategory: FIXED_SUBCATEGORY, purpose: '' });
+                      setFormData({ ...formData, service: s.id, subcategory: '', purpose: '' });
                       if (s.id !== 'Medical') {
                         setRequirementFileGroups({
                           chestXray: [],
@@ -745,12 +745,19 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                 <Tag size={16} className="text-primary" />
                 Sub-category
               </label>
-              <div className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50">
-                <p className="font-bold text-slate-700">{FIXED_SUBCATEGORY}</p>
-                <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                  Fixed sub-category for all appointments
-                </p>
-              </div>
+              <select
+  required
+  className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
+  value={formData.subcategory}
+  onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
+>
+  <option value="" disabled>Select sub-category</option>
+  {SUBCATEGORY_OPTIONS.map((option) => (
+    <option key={option} value={option}>
+      {option}
+    </option>
+  ))}
+</select>
             </div>
 
             <div className="space-y-3">
