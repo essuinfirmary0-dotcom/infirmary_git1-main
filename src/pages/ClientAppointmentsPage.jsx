@@ -6,7 +6,7 @@ import { AppointmentList } from '../components/AppointmentList';
 
 export const ClientAppointmentsPage = () => {
   const navigate = useNavigate();
-  const { appointments, userProfile } = useApp();
+  const { appointments, userProfile, handleCancel } = useApp();
 
   const handleRescheduleRequest = (appointment) => {
     navigate('/app/book', {
@@ -14,6 +14,21 @@ export const ClientAppointmentsPage = () => {
         rescheduleAppointmentId: appointment.id,
       },
     });
+  };
+
+  const handleCancelRequest = async (appointment) => {
+    if (!appointment?.id) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Cancel your appointment for ${appointment.date} at ${appointment.time}? This will release the slot for other patients.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await handleCancel(appointment.id, 'Cancelled by user.');
   };
 
   return (
@@ -32,6 +47,7 @@ export const ClientAppointmentsPage = () => {
         isClient={true}
         user={userProfile}
         onReschedule={handleRescheduleRequest}
+        onCancel={handleCancelRequest}
       />
     </motion.div>
   );

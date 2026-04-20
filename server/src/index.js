@@ -403,15 +403,18 @@ function mapAppointmentRow(row) {
     date: row.appointment_date,
     time: formatTimeSlotLabel(row.time_slot),
     notes: row.notes || '',
-    status: mapAppointmentStatusFromDatabase(row.status),
+    status: mapAppointmentStatusFromDatabase(row.status, row.cancelled_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     slotDefinitionId: row.slot_definition_id || null,
+    cancelledAt: row.cancelled_at || null,
+    cancellationReason: row.cancellation_reason || '',
   };
 }
 
-function mapAppointmentStatusFromDatabase(status) {
+function mapAppointmentStatusFromDatabase(status, cancelledAt = null) {
   const normalized = String(status || '').trim();
+  if (cancelledAt) return 'Cancelled';
   if (normalized === 'Success') return 'Completed';
   if (normalized === 'Cancelled') return 'Not Completed';
   return normalized || 'Waiting';
@@ -429,6 +432,7 @@ async function toDatabaseAppointmentStatus(status) {
     Waiting: ['Ongoing'],
     Ongoing: ['Ongoing'],
     Completed: ['Success', 'Completed', 'Ongoing'],
+    Cancelled: ['Cancelled', 'Not Completed', 'Ongoing'],
     'Not Completed': ['Cancelled', 'Not Completed', 'Ongoing'],
   };
 
@@ -494,6 +498,23 @@ async function ensureQueueCheckInTracking() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_queues_checked_in_at
     ON public.queues(checked_in_at)
+  `);
+}
+
+async function ensureAppointmentCancellationTracking() {
+  await pool.query(`
+    ALTER TABLE public.appointments
+    ADD COLUMN IF NOT EXISTS cancelled_at timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.appointments
+    ADD COLUMN IF NOT EXISTS cancellation_reason text
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_appointments_cancelled_at
+    ON public.appointments(cancelled_at)
   `);
 }
 
@@ -1089,7 +1110,9 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
     const { rows } = await client.query(
       `
         UPDATE public.appointments
-        SET status = $2
+        SET status = $2,
+            cancelled_at = NULL,
+            cancellation_reason = NULL
         WHERE id = $1
         RETURNING *
       `,
@@ -1517,6 +1540,15 @@ function appendNotCompletedReason(existingNotes, reason) {
   }
   const base = normalizeIdentifier(existingNotes);
   const reasonLine = `Not completed reason: ${trimmedReason}`;
+  if (!base) return reasonLine;
+  if (base.includes(reasonLine)) return base;
+  return `${base}\n${reasonLine}`;
+}
+
+function appendCancellationReason(existingNotes, reason) {
+  const trimmedReason = normalizeIdentifier(reason) || 'Cancelled by user.';
+  const base = normalizeIdentifier(existingNotes);
+  const reasonLine = `Cancellation reason: ${trimmedReason}`;
   if (!base) return reasonLine;
   if (base.includes(reasonLine)) return base;
   return `${base}\n${reasonLine}`;
@@ -3048,7 +3080,9 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
               time_slot = $7,
               notes = NULLIF($8, ''),
               status = $9,
-              slot_definition_id = $10
+              slot_definition_id = $10,
+              cancelled_at = NULL,
+              cancellation_reason = NULL
           WHERE id = $1
             AND user_id = $11
           RETURNING *
@@ -3696,15 +3730,13 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
   if (!id) {
     return res.status(400).json({ message: 'Appointment id is required.' });
   }
-  if (!reason) {
-    return res.status(400).json({ message: 'A reason is required when marking as not completed.' });
-  }
 
   try {
+    await markMissedAppointmentsAsNotCompleted();
     const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
     const existing = await pool.query(
       `
-        SELECT id, notes
+        SELECT *
         FROM public.appointments
         WHERE id = $1
           AND user_id = $2
@@ -3712,35 +3744,80 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
       `,
       [id, req.authUser.id],
     );
-    const enrichedNotes = appendNotCompletedReason(existing.rows[0]?.notes || '', reason);
 
-    const { rows } = await pool.query(
-      `
-        UPDATE public.appointments
-        SET status = $3,
-            notes = NULLIF($4, '')
-        WHERE id = $1
-          AND user_id = $2
-        RETURNING *
-      `,
-      [id, req.authUser.id, notCompletedStatus, enrichedNotes],
-    );
-
-    if (!rows[0]) {
+    if (!existing.rows[0]) {
       return res.status(404).json({ message: 'Appointment not found.' });
     }
 
+    const existingAppointment = existing.rows[0];
+    const existingStatus = mapAppointmentStatusFromDatabase(existingAppointment.status, existingAppointment.cancelled_at);
+    if (['Completed', 'Not Completed', 'Cancelled'].includes(existingStatus)) {
+      return res.status(409).json({ message: 'Only upcoming appointments can be cancelled.' });
+    }
+
+    const existingScheduleState = evaluateScheduledAppointmentState(existingAppointment.appointment_date, existingAppointment.time_slot);
+    if (existingScheduleState.status !== 'upcoming') {
+      return res.status(409).json({ message: 'Only upcoming appointments can be cancelled.' });
+    }
+
+    const cancellationReason = reason || 'Cancelled by user.';
+    const enrichedNotes = appendCancellationReason(existingAppointment.notes || '', cancellationReason);
+    const client = await pool.connect();
+    let updatedAppointment;
+
+    try {
+      await client.query('BEGIN');
+
+      const updated = await client.query(
+        `
+          UPDATE public.appointments
+          SET status = $3,
+              notes = NULLIF($4, ''),
+              cancelled_at = now(),
+              cancellation_reason = NULLIF($5, '')
+          WHERE id = $1
+            AND user_id = $2
+          RETURNING *
+        `,
+        [id, req.authUser.id, notCompletedStatus, enrichedNotes, cancellationReason],
+      );
+
+      updatedAppointment = updated.rows[0];
+
+      if (!updatedAppointment) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Appointment not found.' });
+      }
+
+      await client.query(
+        `
+          UPDATE public.queues
+          SET status = 'Cancelled'
+          WHERE appointment_id = $1
+            AND status <> 'Cancelled'
+        `,
+        [id],
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
     await createNotification({
-      userId: rows[0].user_id,
+      userId: updatedAppointment.user_id,
       type: 'appointment_status',
-      title: 'Appointment updated',
-      message: `Your appointment status is now Not Completed.`,
-      appointmentId: rows[0].id,
+      title: 'Appointment cancelled',
+      message: 'Your appointment has been cancelled and the slot is available again.',
+      appointmentId: updatedAppointment.id,
     });
 
-    return res.json(mapAppointmentRow(rows[0]));
+    return res.json(mapAppointmentRow(updatedAppointment));
   } catch (error) {
-    return res.status(500).json({ message: 'Failed to update appointment status.', error: error.message });
+    return res.status(500).json({ message: 'Failed to cancel appointment.', error: error.message });
   }
 });
 
@@ -4040,6 +4117,9 @@ async function runStartupMaintenance() {
 
     console.log('Running ensureQueueCheckInTracking...');
     await ensureQueueCheckInTracking();
+
+    console.log('Running ensureAppointmentCancellationTracking...');
+    await ensureAppointmentCancellationTracking();
 
     console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();

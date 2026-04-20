@@ -97,7 +97,16 @@ const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new 
 
 const isReschedulableAppointment = (appointment) => {
   const status = String(appointment?.status || '').trim();
-  if (!appointment || ['Completed', 'Not Completed'].includes(status)) {
+  if (!appointment || ['Completed', 'Not Completed', 'Cancelled'].includes(status)) {
+    return false;
+  }
+
+  return evaluateScheduledAppointmentState(appointment.date, appointment.time).status === 'upcoming';
+};
+
+const isCancellableAppointment = (appointment) => {
+  const status = String(appointment?.status || '').trim();
+  if (!appointment || ['Completed', 'Not Completed', 'Cancelled'].includes(status)) {
     return false;
   }
 
@@ -109,6 +118,7 @@ const StatusBadge = ({ status }) => {
     'Waiting': 'bg-amber-50 text-amber-700 border-amber-100',
     'Ongoing': 'bg-blue-50 text-blue-600 border-blue-100',
     'Not Completed': 'bg-red-50 text-red-600 border-red-100',
+    'Cancelled': 'bg-slate-100 text-slate-600 border-slate-200',
     'Moved': 'bg-amber-50 text-amber-600 border-amber-100',
     'Completed': 'bg-emerald-50 text-emerald-600 border-emerald-100',
   };
@@ -117,6 +127,7 @@ const StatusBadge = ({ status }) => {
     'Waiting': <Clock size={12} />,
     'Ongoing': <PlayCircle size={12} />,
     'Not Completed': <XCircle size={12} />,
+    'Cancelled': <Trash2 size={12} />,
     'Moved': <RefreshCw size={12} />,
     'Completed': <CheckCircle size={12} />,
   };
@@ -129,13 +140,15 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
+const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedule, onCancel }) => {
   if (!appointment) return null;
   const isGuestUser = user?.userType === 'guest';
   const tempIdentifier = user?.idNumber || user?.qrValue || null;
   const guestType = user?.program?.trim() || '';
   const showCollege = !isGuestUser && Boolean(user?.college?.trim());
   const showProgram = !isGuestUser && Boolean(user?.program?.trim());
+  const canReschedule = typeof onReschedule === 'function' && isReschedulableAppointment(appointment);
+  const canCancel = typeof onCancel === 'function' && isCancellableAppointment(appointment);
 
   return (
     <AnimatePresence>
@@ -328,6 +341,27 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
                 </div>
               </div>
 
+              {(canReschedule || canCancel) && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {canReschedule && (
+                    <button
+                      onClick={() => onReschedule(appointment)}
+                      className="w-full rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 font-semibold text-primary transition-colors hover:bg-primary/10"
+                    >
+                      Reschedule Appointment
+                    </button>
+                  )}
+                  {canCancel && (
+                    <button
+                      onClick={() => onCancel(appointment)}
+                      className="w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-600 transition-colors hover:bg-red-100"
+                    >
+                      Cancel Appointment
+                    </button>
+                  )}
+                </div>
+              )}
+
               <button
                 onClick={onClose}
                 className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-hover transition-all shadow-lg shadow-primary/20"
@@ -368,12 +402,15 @@ export const AppointmentList = ({
         isOpen={!!selectedApt} 
         appointment={selectedApt} 
         user={user}
+        onReschedule={isClient ? onReschedule : undefined}
+        onCancel={isClient ? onCancel : undefined}
         onClose={() => setSelectedApt(null)} 
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
         {appointments.map((apt) => {
           const canReschedule = isClient && typeof onReschedule === 'function' && isReschedulableAppointment(apt);
+          const canCancel = isClient && typeof onCancel === 'function' && isCancellableAppointment(apt);
           return (
           <div 
             key={apt.id} 
@@ -442,19 +479,36 @@ export const AppointmentList = ({
               </div>
             )}
 
-            <div className="mt-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+            {isClient && apt.status === 'Cancelled' && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
+                This appointment was cancelled. You can create a new appointment if you still need this service.
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-wrap gap-2">
               {canReschedule && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onReschedule(apt);
                   }}
-                  className="flex-1 py-2 text-xs font-medium border border-primary/20 text-primary rounded-lg hover:bg-primary/5 transition-colors"
+                  className="flex-1 min-w-[150px] py-2.5 px-3 text-xs font-semibold border border-primary/20 text-primary rounded-lg hover:bg-primary/5 transition-colors"
                 >
                   Reschedule
                 </button>
               )}
-              {!isClient && onUpdateStatus && apt.status !== 'Not Completed' && apt.status !== 'Completed' && (
+              {canCancel && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancel(apt);
+                  }}
+                  className="flex-1 min-w-[150px] py-2.5 px-3 text-xs font-semibold border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  Cancel Appointment
+                </button>
+              )}
+              {!isClient && onUpdateStatus && !['Not Completed', 'Completed', 'Cancelled'].includes(apt.status) && (
                 <>
                   <button 
                     onClick={(e) => { e.stopPropagation(); onUpdateStatus(apt.id, 'Moved'); }}

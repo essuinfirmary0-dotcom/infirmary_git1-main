@@ -320,15 +320,25 @@ export const AppProvider = ({ children }) => {
 
   const handleCancel = async (id, reason = '') => {
     try {
-      await appointmentService.cancel(id, reason);
+      const appointment = await appointmentService.cancel(id, reason);
       setAppointments((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: 'Not Completed' } : a))
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...appointment,
+                queueNumber: null,
+                queueStatus: null,
+              }
+            : a,
+        ),
       );
-      fetchNotifications();
-      toast.success('Appointment marked as not completed.');
+      await Promise.all([fetchAppointments(), fetchNotifications()]);
+      toast.success('Appointment cancelled successfully.');
+      return appointment;
     } catch (err) {
-      const message = err.response?.data?.message || 'Failed to update appointment status.';
+      const message = err.response?.data?.message || 'Failed to cancel appointment.';
       toast.error(message);
+      throw err;
     }
   };
 
