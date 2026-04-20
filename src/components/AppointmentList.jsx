@@ -29,6 +29,81 @@ const ServiceIcon = ({ service }) => {
   }
 };
 
+const parseClockToMinutes = (value) => {
+  const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || '0');
+  const meridiem = String(match[3] || '').toUpperCase();
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === 'AM') {
+      hours = hours === 12 ? 0 : hours;
+    } else if (meridiem === 'PM') {
+      hours = hours === 12 ? 12 : hours + 12;
+    }
+  }
+
+  return (hours * 60) + minutes;
+};
+
+const parseTimeSlotRange = (timeSlot) => {
+  const normalized = String(timeSlot || '').trim();
+  const match = normalized.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*-\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)/i);
+  if (!match) return null;
+
+  const startMinutes = parseClockToMinutes(match[1]);
+  const endMinutes = parseClockToMinutes(match[2]);
+  if (startMinutes == null || endMinutes == null) return null;
+
+  return { startMinutes, endMinutes };
+};
+
+const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new Date()) => {
+  const normalizedDate = String(appointmentDate || '').trim();
+  const slotRange = parseTimeSlotRange(timeSlot);
+
+  if (!normalizedDate) {
+    return { status: 'unknown', slotRange };
+  }
+
+  const today = format(now, 'yyyy-MM-dd');
+  if (normalizedDate > today) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (normalizedDate < today) {
+    return { status: 'past', slotRange };
+  }
+
+  if (!slotRange) {
+    return { status: 'unknown', slotRange: null };
+  }
+
+  const nowMinutes = (now.getHours() * 60) + now.getMinutes();
+  if (nowMinutes < slotRange.startMinutes) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (nowMinutes <= slotRange.endMinutes) {
+    return { status: 'active', slotRange };
+  }
+
+  return { status: 'past', slotRange };
+};
+
+const isReschedulableAppointment = (appointment) => {
+  const status = String(appointment?.status || '').trim();
+  if (!appointment || ['Completed', 'Not Completed'].includes(status)) {
+    return false;
+  }
+
+  return evaluateScheduledAppointmentState(appointment.date, appointment.time).status === 'upcoming';
+};
+
 const StatusBadge = ({ status }) => {
   const styles = {
     'Waiting': 'bg-amber-50 text-amber-700 border-amber-100',
@@ -225,7 +300,14 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
   );
 };
 
-export const AppointmentList = ({ appointments, onCancel, onUpdateStatus, isClient = false, user = null }) => {
+export const AppointmentList = ({
+  appointments,
+  onCancel,
+  onUpdateStatus,
+  onReschedule,
+  isClient = false,
+  user = null,
+}) => {
   const [selectedApt, setSelectedApt] = useState(null);
 
   if (appointments.length === 0) {
@@ -248,7 +330,9 @@ export const AppointmentList = ({ appointments, onCancel, onUpdateStatus, isClie
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-        {appointments.map((apt) => (
+        {appointments.map((apt) => {
+          const canReschedule = isClient && typeof onReschedule === 'function' && isReschedulableAppointment(apt);
+          return (
           <div 
             key={apt.id} 
             onClick={() => setSelectedApt(apt)}
@@ -312,11 +396,22 @@ export const AppointmentList = ({ appointments, onCancel, onUpdateStatus, isClie
 
             {isClient && apt.status === 'Not Completed' && (
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                This appointment was not attended. Book again to reschedule for another time.
+                This appointment was not attended. Create a new appointment if you still need this service.
               </div>
             )}
 
             <div className="mt-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+              {canReschedule && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReschedule(apt);
+                  }}
+                  className="flex-1 py-2 text-xs font-medium border border-primary/20 text-primary rounded-lg hover:bg-primary/5 transition-colors"
+                >
+                  Reschedule
+                </button>
+              )}
               {!isClient && onUpdateStatus && apt.status !== 'Not Completed' && apt.status !== 'Completed' && (
                 <>
                   <button 
@@ -344,7 +439,8 @@ export const AppointmentList = ({ appointments, onCancel, onUpdateStatus, isClie
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );

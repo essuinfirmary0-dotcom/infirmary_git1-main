@@ -1,10 +1,14 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
 import { BookingForm } from '../components/BookingForm';
 
 export const ClientBookPage = () => {
-  const { appointments, handleBook, userProfile, isGuestUser, setStoredAuthUser } = useApp();
+  const location = useLocation();
+  const { appointments, handleBook, handleReschedule, userProfile, isGuestUser, setStoredAuthUser } = useApp();
+  const rescheduleAppointmentId = location.state?.rescheduleAppointmentId;
+  const rescheduleAppointment = appointments.find((appointment) => appointment.id === rescheduleAppointmentId) || null;
 
   return (
     <motion.div
@@ -14,10 +18,12 @@ export const ClientBookPage = () => {
     >
       <BookingForm
         onBook={handleBook}
+        onReschedule={handleReschedule}
         appointments={appointments}
         user={userProfile}
         isGuestUser={isGuestUser}
         onUserUpdated={setStoredAuthUser}
+        rescheduleAppointment={rescheduleAppointment}
       />
     </motion.div>
   );

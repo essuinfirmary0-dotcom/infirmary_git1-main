@@ -80,7 +80,9 @@ const parseTimeSlotEndMinutes = (slotLabel) => {
   return (hours * 60) + minutes;
 };
 
-const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, guestCourse }) => {
+const isActiveAppointmentStatus = (status) => !['Completed', 'Not Completed'].includes(String(status || '').trim());
+
+const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, guestCourse, isRescheduleMode = false }) => {
   if (!appointment) return null;
   const showDepartment = Boolean(user?.college?.trim());
   const showProgram = Boolean(user?.program?.trim());
@@ -218,8 +220,14 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
               <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 backdrop-blur-md">
                 <CheckCircle2 className="w-8 h-8 sm:w-10 sm:h-10" />
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold">Booking Confirmed!</h2>
-              <p className="text-white/80 mt-2 text-sm sm:text-base">Your appointment has been successfully scheduled.</p>
+              <h2 className="text-2xl sm:text-3xl font-bold">
+                {isRescheduleMode ? 'Reschedule Confirmed!' : 'Booking Confirmed!'}
+              </h2>
+              <p className="text-white/80 mt-2 text-sm sm:text-base">
+                {isRescheduleMode
+                  ? 'Your appointment has been successfully moved to the new schedule.'
+                  : 'Your appointment has been successfully scheduled.'}
+              </p>
             </div>
 
             <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
@@ -348,7 +356,88 @@ const initialFormData = (user) => ({
   notes: '',
 });
 
-export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, onUserUpdated }) => {
+const parseAppointmentDateValue = (value) => {
+  if (!value) return getNextOpenBookingDate();
+  if (value instanceof Date && isValid(value)) return value;
+  const parsed = typeof value === 'string' ? parseISO(value) : new Date(value);
+  return isValid(parsed) ? parsed : getNextOpenBookingDate();
+};
+
+const parseClockToMinutes = (value) => {
+  const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || '0');
+  const meridiem = String(match[3] || '').toUpperCase();
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === 'AM') {
+      hours = hours === 12 ? 0 : hours;
+    } else if (meridiem === 'PM') {
+      hours = hours === 12 ? 12 : hours + 12;
+    }
+  }
+
+  return (hours * 60) + minutes;
+};
+
+const parseTimeSlotRange = (timeSlot) => {
+  const normalized = String(timeSlot || '').trim();
+  const match = normalized.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*-\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)/i);
+  if (!match) return null;
+
+  const startMinutes = parseClockToMinutes(match[1]);
+  const endMinutes = parseClockToMinutes(match[2]);
+  if (startMinutes == null || endMinutes == null) return null;
+
+  return { startMinutes, endMinutes };
+};
+
+const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new Date()) => {
+  const normalizedDate = String(appointmentDate || '').trim();
+  const slotRange = parseTimeSlotRange(timeSlot);
+
+  if (!normalizedDate) {
+    return { status: 'unknown', slotRange };
+  }
+
+  const today = format(now, 'yyyy-MM-dd');
+  if (normalizedDate > today) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (normalizedDate < today) {
+    return { status: 'past', slotRange };
+  }
+
+  if (!slotRange) {
+    return { status: 'unknown', slotRange: null };
+  }
+
+  const nowMinutes = (now.getHours() * 60) + now.getMinutes();
+  if (nowMinutes < slotRange.startMinutes) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (nowMinutes <= slotRange.endMinutes) {
+    return { status: 'active', slotRange };
+  }
+
+  return { status: 'past', slotRange };
+};
+
+export const BookingForm = ({
+  onBook,
+  onReschedule,
+  appointments,
+  user,
+  isGuestUser = false,
+  onUserUpdated,
+  rescheduleAppointment = null,
+}) => {
   const navigate = useNavigate();
   const [date, setDate] = useState(() => getNextOpenBookingDate());
   const [formData, setFormData] = useState(() => initialFormData(user));
@@ -357,6 +446,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
     urinalysis: [],
   });
   const submitLockRef = useRef(false);
+  const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
 
   useEffect(() => {
     if (user?.name || user?.program || user?.userType === 'guest') {
@@ -369,6 +459,28 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!isRescheduleMode || !rescheduleAppointment) {
+      return;
+    }
+
+    setDate(parseAppointmentDateValue(rescheduleAppointment.date));
+    setFormData((prev) => ({
+      ...prev,
+      patientName: isGuestUser ? (prev.patientName || user?.name || '') : (user?.name || rescheduleAppointment.patientName || prev.patientName),
+      course: user?.program || prev.course,
+      service: rescheduleAppointment.service || prev.service,
+      subcategory: rescheduleAppointment.subcategory || '',
+      purpose: rescheduleAppointment.purpose || '',
+      timeSlot: rescheduleAppointment.time || '',
+      notes: rescheduleAppointment.notes || '',
+    }));
+    setRequirementFileGroups({
+      chestXray: [],
+      urinalysis: [],
+    });
+  }, [isGuestUser, isRescheduleMode, rescheduleAppointment, user]);
+
   const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
   const availablePurposes = formData.service ? (purposeOptions[formData.service] || []) : [];
@@ -378,8 +490,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
     ...requirementFileGroups.chestXray.map((file) => ({ file, label: 'Chest Xray' })),
     ...requirementFileGroups.urinalysis.map((file) => ({ file, label: 'Urinalyses' })),
   ];
-  const hasNotCompletedAppointment = (appointments || []).some((apt) => apt.status === 'Not Completed');
-
+  const requiresMedicalUpload = isMedicalService && !isRescheduleMode && requirementFiles.length === 0;
   useEffect(() => {
     if (!formData.service) {
       if (formData.purpose) {
@@ -498,11 +609,23 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
       toast.error('Please select a time slot.');
       return;
     }
+    const selectedDate = format(date, 'yyyy-MM-dd');
+    const hasSameSlotConflict = (appointments || []).some(
+      (apt) =>
+        apt.id !== rescheduleAppointment?.id &&
+        apt.date === selectedDate &&
+        apt.time === formData.timeSlot &&
+        isActiveAppointmentStatus(apt.status),
+    );
+    if (hasSameSlotConflict) {
+      toast.error('You already have an appointment in that same date and time slot.');
+      return;
+    }
     if (isSlotUnavailable(formData.timeSlot)) {
       toast.error('Selected time slot is no longer available.');
       return;
     }
-    if (isMedicalService && requirementFiles.length === 0) {
+    if (requiresMedicalUpload) {
       toast.error('Please upload at least one medical requirement file.');
       return;
     }
@@ -537,7 +660,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
         }
       }
 
-      const appointment = await onBook({
+      const payload = {
         ...formData,
         patientName: isGuestUser ? formData.patientName.trim() : (user?.name || formData.patientName),
         date: format(date, 'yyyy-MM-dd'),
@@ -552,13 +675,21 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
         ]
           .filter(Boolean)
           .join('\n'),
-      });
+      };
+
+      const appointment = isRescheduleMode
+        ? await onReschedule(rescheduleAppointment.id, payload)
+        : await onBook(payload);
 
       await loadSlotAvailability(date);
       setLastBooked(appointment);
       setShowConfirmation(true);
     } catch (err) {
-      const message = err.response?.data?.message || 'Failed to book appointment. Please try again.';
+      const message =
+        err.response?.data?.message ||
+        (isRescheduleMode
+          ? 'Failed to reschedule appointment. Please try again.'
+          : 'Failed to book appointment. Please try again.');
       toast.error(message);
     } finally {
       submitLockRef.current = false;
@@ -575,10 +706,17 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
         user={user}
         isGuestUser={isGuestUser}
         guestCourse={formData.course}
+        isRescheduleMode={isRescheduleMode}
       />
 
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8 px-0">
         <div className="space-y-4 sm:space-y-8 min-w-0">
+          {isRescheduleMode && rescheduleAppointment && (
+            <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4 text-sm font-semibold text-primary">
+              Rescheduling {rescheduleAppointment.service} from {safeFormat(rescheduleAppointment.date, 'MMM d, yyyy')} at {rescheduleAppointment.time}.
+              Choose a new future slot below.
+            </div>
+          )}
           <div className="bg-white p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 min-w-0">
             <h2 className="text-lg sm:text-xl font-bold text-slate-800 mb-4 sm:mb-6 flex items-center gap-2">
               <CalendarIcon size={20} className="text-primary shrink-0" />
@@ -654,20 +792,19 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
 
         <div className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 overflow-hidden min-w-0">
           <div className="bg-primary p-5 sm:p-6 md:p-8 text-white">
-            <h2 className="text-xl sm:text-2xl font-bold">2. Patient Details</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">
+              {isRescheduleMode ? '2. Update Appointment' : '2. Patient Details'}
+            </h2>
             <p className="text-white/80 text-xs sm:text-sm mt-1">
-              {isGuestUser
+              {isRescheduleMode
+                ? 'You can only reschedule upcoming appointments, and the service stays the same.'
+                : isGuestUser
                 ? `Guest booking is limited to Medical service. Complete your details for ${safeFormat(date, 'MMM d')}.`
                 : `Tell us more about your visit on ${safeFormat(date, 'MMM d')}.`}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-8">
-            {hasNotCompletedAppointment && (
-              <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold">
-                You have a missed/not-attended appointment. Submitting this form will reschedule that appointment instead of creating a new one.
-              </div>
-            )}
             <div className="space-y-3">
               <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
                 <User size={16} className="text-primary" />
@@ -714,12 +851,19 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                 <FileText size={16} className="text-primary" />
                 Select Service
               </label>
+              {isRescheduleMode && (
+                <div className="rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-xs font-semibold text-primary">
+                  Rescheduling keeps the same service. If you need a different service, create a new appointment instead.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {serviceOptions.map((s) => (
                   <button
                     key={s.id}
                     type="button"
+                    disabled={isRescheduleMode}
                     onClick={() => {
+                      if (isRescheduleMode) return;
                       setFormData({ ...formData, service: s.id, subcategory: '', purpose: '' });
                       if (s.id !== 'Medical') {
                         setRequirementFileGroups({
@@ -731,7 +875,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                     className={`p-4 rounded-2xl border text-left transition-all ${formData.service === s.id
                       ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                       : 'border-slate-200 hover:border-primary/30'
-                      }`}
+                      } ${isRescheduleMode ? 'cursor-not-allowed opacity-80' : ''}`}
                   >
                     <p className={`font-bold ${formData.service === s.id ? 'text-primary' : 'text-slate-700'}`}>{s.label}</p>
                     <p className="text-[10px] text-slate-400 mt-1 leading-tight">{s.description}</p>
@@ -797,6 +941,11 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                 <label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
                   Medical Requirements Upload
                 </label>
+                {isRescheduleMode && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+                    Re-uploading medical requirements is optional when you are only rescheduling an upcoming appointment.
+                  </div>
+                )}
                 <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-slate-700">
@@ -805,7 +954,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                     <input
                       type="file"
                       multiple
-                      required={isMedicalService && requirementFiles.length === 0}
+                      required={requiresMedicalUpload}
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                       onChange={(e) => handleRequirementGroupChange('chestXray', e.target.files)}
                       className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
@@ -824,7 +973,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                     <input
                       type="file"
                       multiple
-                      required={isMedicalService && requirementFiles.length === 0}
+                      required={requiresMedicalUpload}
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                       onChange={(e) => handleRequirementGroupChange('urinalysis', e.target.files)}
                       className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
@@ -854,7 +1003,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                 !formData.service ||
                 !formData.purpose ||
                 !formData.timeSlot ||
-                (isMedicalService && requirementFiles.length === 0) ||
+                requiresMedicalUpload ||
                 (isGuestUser && (!formData.patientName.trim() || !formData.course.trim()))
               }
               className={`w-full py-4 sm:py-5 rounded-xl sm:rounded-2xl font-black text-base sm:text-lg text-white transition-all flex items-center justify-center gap-3 shadow-xl ${isSubmitting ? 'bg-emerald-500' : 'bg-primary hover:bg-primary-hover shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -866,7 +1015,7 @@ export const BookingForm = ({ onBook, appointments, user, isGuestUser = false, o
                   Processing...
                 </>
               ) : (
-                'Confirm Appointment'
+                isRescheduleMode ? 'Confirm Reschedule' : 'Confirm Appointment'
               )}
             </button>
           </form>

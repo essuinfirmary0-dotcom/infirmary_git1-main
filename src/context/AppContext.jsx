@@ -271,7 +271,6 @@ export const AppProvider = ({ children }) => {
   }, [authUser, fetchAppointments, fetchNotifications, fetchConsultationPatients]);
 
   const handleBook = async (newApt) => {
-    const reschedulable = appointments.find((apt) => apt.status === 'Not Completed');
     const payload = {
       patientName: newApt.patientName,
       service: newApt.service,
@@ -283,16 +282,38 @@ export const AppProvider = ({ children }) => {
       requirementFiles: Array.isArray(newApt.requirementFiles) ? newApt.requirementFiles : [],
       attachmentFiles: Array.isArray(newApt.attachmentFiles) ? newApt.attachmentFiles : [],
     };
-    const appointment = reschedulable
-      ? await appointmentService.reschedule(reschedulable.id, payload)
-      : await appointmentService.book(payload);
+    const appointment = await appointmentService.book(payload);
 
-    setAppointments((prev) => {
-      if (!reschedulable) {
-        return [appointment, ...prev];
-      }
-      return prev.map((apt) => (apt.id === reschedulable.id ? appointment : apt));
-    });
+    setAppointments((prev) => [appointment, ...prev]);
+    await fetchNotifications();
+    return appointment;
+  };
+
+  const handleReschedule = async (id, updatedApt) => {
+    const payload = {
+      patientName: updatedApt.patientName,
+      service: updatedApt.service,
+      subcategory: updatedApt.subcategory,
+      purpose: updatedApt.purpose,
+      date: updatedApt.date,
+      time: updatedApt.time,
+      notes: updatedApt.notes,
+      requirementFiles: Array.isArray(updatedApt.requirementFiles) ? updatedApt.requirementFiles : [],
+      attachmentFiles: Array.isArray(updatedApt.attachmentFiles) ? updatedApt.attachmentFiles : [],
+    };
+    const appointment = await appointmentService.reschedule(id, payload);
+
+    setAppointments((prev) =>
+      prev.map((existingAppointment) =>
+        existingAppointment.id === id
+          ? {
+              ...appointment,
+              queueNumber: null,
+              queueStatus: null,
+            }
+          : existingAppointment,
+      ),
+    );
     await fetchNotifications();
     return appointment;
   };
@@ -438,6 +459,7 @@ export const AppProvider = ({ children }) => {
     fetchAppointments,
     fetchAllAppointments,
     handleBook,
+    handleReschedule,
     handleCancel,
     handleUpdateStatus,
     mockUsers,

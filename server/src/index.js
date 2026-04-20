@@ -580,6 +580,39 @@ function evaluateAppointmentArrivalWindow(timeSlot, date = new Date()) {
   return { status: 'active', slotRange };
 }
 
+function evaluateScheduledAppointmentState(appointmentDate, timeSlot, date = new Date()) {
+  const normalizedDate = String(appointmentDate || '').trim();
+  const slotRange = parseTimeSlotRange(timeSlot);
+
+  if (!normalizedDate) {
+    return { status: 'unknown', slotRange };
+  }
+
+  const today = getTodayInManila(date);
+  if (normalizedDate > today) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (normalizedDate < today) {
+    return { status: 'past', slotRange };
+  }
+
+  if (!slotRange) {
+    return { status: 'unknown', slotRange: null };
+  }
+
+  const nowMinutes = getCurrentMinutesInManila(date);
+  if (nowMinutes < slotRange.startMinutes) {
+    return { status: 'upcoming', slotRange };
+  }
+
+  if (nowMinutes <= slotRange.endMinutes) {
+    return { status: 'active', slotRange };
+  }
+
+  return { status: 'past', slotRange };
+}
+
 function formatKioskCheckInDate(date = new Date()) {
   return new Intl.DateTimeFormat('en-PH', {
     timeZone: 'Asia/Manila',
@@ -2669,6 +2702,28 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
     const initialStatus = await getInitialAppointmentStatus();
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
     const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+    const requestedScheduleState = evaluateScheduledAppointmentState(date, timeSlot);
+    if (requestedScheduleState.status !== 'upcoming') {
+      return res.status(409).json({ message: 'Appointments can only be booked for a future date and time slot.' });
+    }
+
+    const { rows: conflictingRows } = await pool.query(
+      `
+        SELECT id
+        FROM public.appointments
+        WHERE user_id = $1
+          AND appointment_date = $2
+          AND time_slot = $3
+          AND status NOT IN ($4, $5)
+        LIMIT 1
+      `,
+      [req.authUser.id, date, timeSlot, completedStatus, notCompletedStatus],
+    );
+
+    if (conflictingRows[0]) {
+      return res.status(409).json({ message: 'You already have an appointment in that same date and time slot.' });
+    }
+
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
     if (!slotDefinition) {
       return res.status(400).json({ message: 'Selected time slot is no longer available.' });
@@ -2794,8 +2849,46 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
       return res.status(404).json({ message: 'Appointment not found.' });
     }
 
-    if (existing.rows[0].status !== notCompletedStatus) {
-      return res.status(409).json({ message: 'Only skipped/not-completed appointments can be rescheduled.' });
+    const existingAppointment = existing.rows[0];
+    const existingStatus = mapAppointmentStatusFromDatabase(existingAppointment.status);
+    if (['Completed', 'Not Completed'].includes(existingStatus)) {
+      return res.status(409).json({
+        message: 'Missed, not attended, or completed appointments cannot be rescheduled. Please create a new appointment instead.',
+      });
+    }
+
+    const existingScheduleState = evaluateScheduledAppointmentState(existingAppointment.appointment_date, existingAppointment.time_slot);
+    if (existingScheduleState.status !== 'upcoming') {
+      return res.status(409).json({ message: 'Only upcoming appointments can be rescheduled.' });
+    }
+
+    if (existingAppointment.service && existingAppointment.service !== service) {
+      return res.status(409).json({
+        message: 'Appointments can only be rescheduled within the same service. Please create a new appointment for a different service.',
+      });
+    }
+
+    const requestedScheduleState = evaluateScheduledAppointmentState(date, timeSlot);
+    if (requestedScheduleState.status !== 'upcoming') {
+      return res.status(409).json({ message: 'Appointments can only be rescheduled to a future date and time slot.' });
+    }
+
+    const { rows: conflictingRows } = await pool.query(
+      `
+        SELECT id
+        FROM public.appointments
+        WHERE user_id = $1
+          AND appointment_date = $2
+          AND time_slot = $3
+          AND status NOT IN ($4, $5)
+          AND id <> $6
+        LIMIT 1
+      `,
+      [req.authUser.id, date, timeSlot, completedStatus, notCompletedStatus, id],
+    );
+
+    if (conflictingRows[0]) {
+      return res.status(409).json({ message: 'You already have an appointment in that same date and time slot.' });
     }
 
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
