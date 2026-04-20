@@ -2334,6 +2334,30 @@ app.get('/api/auth/me', loadAuthenticatedUser, async (req, res) => {
   });
 });
 
+app.get('/api/departments', loadAuthenticatedUser, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT id, name, type, created_at
+        FROM public.departments
+        WHERE LOWER(COALESCE(type, '')) = 'academic'
+        ORDER BY name ASC
+      `,
+    );
+
+    return res.json(
+      rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        type: row.type || '',
+        createdAt: row.created_at || null,
+      })),
+    );
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load departments.', error: error.message });
+  }
+});
+
 app.get('/api/activity-logs', loadAuthenticatedUser, async (req, res) => {
   if (!ensureSuperAdmin(req, res)) {
     return;

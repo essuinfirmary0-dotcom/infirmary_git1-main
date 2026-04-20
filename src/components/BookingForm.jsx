@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import ReactCalendar from 'react-calendar';
 import { appointmentService } from '../services/appointmentService';
 import { profileService } from '../services/profileService';
+import { departmentService } from '../services/departmentService';
 import 'react-calendar/dist/Calendar.css';
 import { format, isBefore, startOfToday, getDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
 import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, X, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
@@ -52,14 +53,42 @@ const guestPurposesByService = {
   Medical: ['School Requirement'],
 };
 
-const STUDENT_COLLEGES = ['College of Engineering'];
-const STUDENT_PROGRAMS_BY_COLLEGE = {
-  'College of Engineering': ['Computer Engineering', 'Electrical Engineering', 'Civil Engineering'],
+const ENGINEERING_COLLEGE_NAME = 'College of Engineering';
+const DEFAULT_STUDENT_COLLEGES = [ENGINEERING_COLLEGE_NAME];
+const DEFAULT_STUDENT_PROGRAMS_BY_COLLEGE = {
+  [ENGINEERING_COLLEGE_NAME]: [
+    'BS in Civil Enginerring',
+    'BS in Computer Engineering',
+    'BS in Electrical Engineering',
+  ],
 };
 const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
 
 const isStudentBookingUserType = (userType) =>
   STUDENT_BOOKING_USER_TYPES.has(String(userType || '').trim().toLowerCase());
+
+const buildStudentAcademicOptions = (departments = []) => {
+  const engineeringPrograms = [...new Set(
+    (Array.isArray(departments) ? departments : [])
+      .map((department) => String(department?.name || '').trim())
+      .filter(Boolean)
+      .filter((name) => /engineering/i.test(name)),
+  )].sort((left, right) => left.localeCompare(right));
+
+  if (!engineeringPrograms.length) {
+    return {
+      colleges: DEFAULT_STUDENT_COLLEGES,
+      programsByCollege: DEFAULT_STUDENT_PROGRAMS_BY_COLLEGE,
+    };
+  }
+
+  return {
+    colleges: [ENGINEERING_COLLEGE_NAME],
+    programsByCollege: {
+      [ENGINEERING_COLLEGE_NAME]: engineeringPrograms,
+    },
+  };
+};
 
 const MAX_SLOTS = 50;
 const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM', '4:00 PM - 7:00 PM', '7:00 PM - 11:00 PM'];
@@ -483,9 +512,33 @@ export const BookingForm = ({
     chestXray: [],
     urinalysis: [],
   });
+  const [studentAcademicOptions, setStudentAcademicOptions] = useState(() =>
+    buildStudentAcademicOptions(),
+  );
   const submitLockRef = useRef(false);
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
   const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDepartmentOptions = async () => {
+      try {
+        const departments = await departmentService.getAcademicDepartments();
+        if (!isMounted) return;
+        setStudentAcademicOptions(buildStudentAcademicOptions(departments));
+      } catch {
+        if (!isMounted) return;
+        setStudentAcademicOptions(buildStudentAcademicOptions());
+      }
+    };
+
+    loadDepartmentOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (user?.name || user?.program || user?.college || user?.userType === 'guest') {
@@ -525,7 +578,7 @@ export const BookingForm = ({
   }, [isGuestUser, isRescheduleMode, isStudentBookingUser, rescheduleAppointment, user]);
 
   const availableStudentPrograms = formData.college
-    ? (STUDENT_PROGRAMS_BY_COLLEGE[formData.college] || [])
+    ? (studentAcademicOptions.programsByCollege[formData.college] || [])
     : [];
 
   useEffect(() => {
@@ -533,7 +586,7 @@ export const BookingForm = ({
       return;
     }
 
-    if (formData.college && !STUDENT_COLLEGES.includes(formData.college)) {
+    if (formData.college && !studentAcademicOptions.colleges.includes(formData.college)) {
       setFormData((prev) => ({ ...prev, college: '', program: '' }));
       return;
     }
@@ -548,7 +601,7 @@ export const BookingForm = ({
     if (!availableStudentPrograms.includes(formData.program)) {
       setFormData((prev) => ({ ...prev, program: '' }));
     }
-  }, [availableStudentPrograms, formData.college, formData.program, isStudentBookingUser]);
+  }, [availableStudentPrograms, formData.college, formData.program, isStudentBookingUser, studentAcademicOptions.colleges]);
 
   const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
@@ -994,7 +1047,7 @@ export const BookingForm = ({
                     onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value, program: '' }))}
                   >
                     <option value="" disabled>Select college</option>
-                    {STUDENT_COLLEGES.map((college) => (
+                    {studentAcademicOptions.colleges.map((college) => (
                       <option key={college} value={college}>{college}</option>
                     ))}
                   </select>
