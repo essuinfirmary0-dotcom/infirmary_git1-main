@@ -52,6 +52,15 @@ const guestPurposesByService = {
   Medical: ['School Requirement'],
 };
 
+const STUDENT_COLLEGES = ['College of Engineering'];
+const STUDENT_PROGRAMS_BY_COLLEGE = {
+  'College of Engineering': ['Computer Engineering', 'Electrical Engineering', 'Civil Engineering'],
+};
+const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
+
+const isStudentBookingUserType = (userType) =>
+  STUDENT_BOOKING_USER_TYPES.has(String(userType || '').trim().toLowerCase());
+
 const MAX_SLOTS = 50;
 const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM', '4:00 PM - 7:00 PM', '7:00 PM - 11:00 PM'];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
@@ -97,10 +106,22 @@ const parseTimeSlotEndMinutes = (slotLabel) => {
 
 const isActiveAppointmentStatus = (status) => !['Completed', 'Not Completed'].includes(String(status || '').trim());
 
-const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, guestType, isRescheduleMode = false }) => {
+const ConfirmationModal = ({
+  isOpen,
+  appointment,
+  onClose,
+  user,
+  isGuestUser,
+  guestType,
+  selectedCollege = '',
+  selectedProgram = '',
+  isRescheduleMode = false,
+}) => {
   if (!appointment) return null;
-  const showDepartment = !isGuestUser && Boolean(user?.college?.trim());
-  const showProgram = !isGuestUser && Boolean(user?.program?.trim());
+  const displayCollege = !isGuestUser ? (selectedCollege?.trim() || user?.college?.trim() || '') : '';
+  const displayProgram = !isGuestUser ? (selectedProgram?.trim() || user?.program?.trim() || '') : '';
+  const showCollege = !isGuestUser && Boolean(displayCollege);
+  const showProgram = !isGuestUser && Boolean(displayProgram);
   const tempIdentifier = user?.idNumber || user?.qrValue || null;
   const guestQrCode = user?.qrCode || null;
 
@@ -317,23 +338,23 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
                 </div>
               )}
 
-              {(showDepartment || showProgram) && (
+              {(showCollege || showProgram) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
-                  {showDepartment && (
+                  {showCollege && (
                     <div className="space-y-1">
-                      <p className="text-xs font-bold text-slate-400 uppercase">Department</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase">College</p>
                       <p className="font-bold text-slate-800 flex items-start gap-2">
                         <Building2 size={14} className="text-primary shrink-0 mt-0.5" />
-                        <span className="min-w-0">{user.college}</span>
+                        <span className="min-w-0">{displayCollege}</span>
                       </p>
                     </div>
                   )}
                   {showProgram && (
                     <div className="space-y-1">
-                      <p className="text-xs font-bold text-slate-400 uppercase">Program</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Department / Program</p>
                       <p className="font-bold text-slate-800 flex items-start gap-2">
                         <GraduationCap size={14} className="text-primary shrink-0 mt-0.5" />
-                        <span className="min-w-0">{user.program}</span>
+                        <span className="min-w-0">{displayProgram}</span>
                       </p>
                     </div>
                   )}
@@ -364,6 +385,8 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
 const initialFormData = (user) => ({
   patientName: user?.name || '',
   guestType: user?.program || '',
+  college: user?.college || '',
+  program: user?.program || '',
   service: user?.userType === 'guest' ? 'Medical' : '',
   subcategory: '',
   purpose: '',
@@ -462,17 +485,20 @@ export const BookingForm = ({
   });
   const submitLockRef = useRef(false);
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
+  const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
 
   useEffect(() => {
-    if (user?.name || user?.program || user?.userType === 'guest') {
+    if (user?.name || user?.program || user?.college || user?.userType === 'guest') {
       setFormData(prev => ({
         ...prev,
         patientName: user?.userType === 'guest' ? prev.patientName : (user?.name || prev.patientName),
         guestType: user?.program || prev.guestType,
+        college: isStudentBookingUser ? (user?.college || prev.college) : prev.college,
+        program: isStudentBookingUser ? (user?.program || prev.program) : prev.program,
         service: user?.userType === 'guest' ? 'Medical' : prev.service,
       }));
     }
-  }, [user]);
+  }, [isStudentBookingUser, user]);
 
   useEffect(() => {
     if (!isRescheduleMode || !rescheduleAppointment) {
@@ -484,6 +510,8 @@ export const BookingForm = ({
       ...prev,
       patientName: isGuestUser ? (prev.patientName || user?.name || '') : (user?.name || rescheduleAppointment.patientName || prev.patientName),
       guestType: user?.program || prev.guestType,
+      college: isStudentBookingUser ? (user?.college || prev.college) : prev.college,
+      program: isStudentBookingUser ? (user?.program || prev.program) : prev.program,
       service: rescheduleAppointment.service || prev.service,
       subcategory: rescheduleAppointment.subcategory || '',
       purpose: rescheduleAppointment.purpose || '',
@@ -494,7 +522,33 @@ export const BookingForm = ({
       chestXray: [],
       urinalysis: [],
     });
-  }, [isGuestUser, isRescheduleMode, rescheduleAppointment, user]);
+  }, [isGuestUser, isRescheduleMode, isStudentBookingUser, rescheduleAppointment, user]);
+
+  const availableStudentPrograms = formData.college
+    ? (STUDENT_PROGRAMS_BY_COLLEGE[formData.college] || [])
+    : [];
+
+  useEffect(() => {
+    if (!isStudentBookingUser) {
+      return;
+    }
+
+    if (formData.college && !STUDENT_COLLEGES.includes(formData.college)) {
+      setFormData((prev) => ({ ...prev, college: '', program: '' }));
+      return;
+    }
+
+    if (!formData.college) {
+      if (formData.program) {
+        setFormData((prev) => ({ ...prev, program: '' }));
+      }
+      return;
+    }
+
+    if (!availableStudentPrograms.includes(formData.program)) {
+      setFormData((prev) => ({ ...prev, program: '' }));
+    }
+  }, [availableStudentPrograms, formData.college, formData.program, isStudentBookingUser]);
 
   const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
@@ -648,6 +702,14 @@ export const BookingForm = ({
       toast.error('Please enter the type of guest.');
       return;
     }
+    if (isStudentBookingUser && !formData.college.trim()) {
+      toast.error('Please select your college.');
+      return;
+    }
+    if (isStudentBookingUser && !formData.program.trim()) {
+      toast.error('Please select your department / program.');
+      return;
+    }
     if (!formData.service) {
       toast.error('Please select a service.');
       return;
@@ -712,6 +774,22 @@ export const BookingForm = ({
         if (profileResult?.user && typeof onUserUpdated === 'function') {
           onUserUpdated(profileResult.user);
         }
+      } else if (isStudentBookingUser) {
+        const profileResult = await profileService.updateProfile({
+          firstName: user?.firstName || '',
+          middleName: user?.middleName || '',
+          lastName: user?.lastName || '',
+          email: user?.email || '',
+          phone: user?.phone || '',
+          address: user?.address || '',
+          college: formData.college.trim(),
+          program: formData.program.trim(),
+          pictureUrl: user?.pictureUrl || '',
+        });
+
+        if (profileResult?.user && typeof onUserUpdated === 'function') {
+          onUserUpdated(profileResult.user);
+        }
       }
 
       const payload = {
@@ -760,6 +838,8 @@ export const BookingForm = ({
         user={user}
         isGuestUser={isGuestUser}
         guestType={formData.guestType}
+        selectedCollege={formData.college}
+        selectedProgram={formData.program}
         isRescheduleMode={isRescheduleMode}
       />
 
@@ -897,6 +977,49 @@ export const BookingForm = ({
                   />
                 </div>
 
+              </>
+            )}
+
+            {isStudentBookingUser && (
+              <>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                    <Building2 size={16} className="text-primary" />
+                    College
+                  </label>
+                  <select
+                    required
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
+                    value={formData.college}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value, program: '' }))}
+                  >
+                    <option value="" disabled>Select college</option>
+                    {STUDENT_COLLEGES.map((college) => (
+                      <option key={college} value={college}>{college}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                    <GraduationCap size={16} className="text-primary" />
+                    Department / Program
+                  </label>
+                  <select
+                    required
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                    value={formData.program}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, program: e.target.value }))}
+                    disabled={!formData.college}
+                  >
+                    <option value="" disabled>
+                      {formData.college ? 'Select department / program' : 'Select a college first'}
+                    </option>
+                    {availableStudentPrograms.map((program) => (
+                      <option key={program} value={program}>{program}</option>
+                    ))}
+                  </select>
+                </div>
               </>
             )}
 
@@ -1064,7 +1187,8 @@ export const BookingForm = ({
                 !formData.subcategory ||
                 !formData.purpose ||
                 !formData.timeSlot ||
-                (isGuestUser && (!formData.patientName.trim() || !formData.guestType.trim()))
+                (isGuestUser && (!formData.patientName.trim() || !formData.guestType.trim())) ||
+                (isStudentBookingUser && (!formData.college.trim() || !formData.program.trim()))
               }
               className={`w-full py-4 sm:py-5 rounded-xl sm:rounded-2xl font-black text-base sm:text-lg text-white transition-all flex items-center justify-center gap-3 shadow-xl ${isSubmitting ? 'bg-emerald-500' : 'bg-primary hover:bg-primary-hover shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'
                 }`}

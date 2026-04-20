@@ -2990,12 +2990,12 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
         SELECT time_slot, COUNT(*)::int AS booked_count
         FROM public.appointments
         WHERE appointment_date = $1
-          AND status NOT IN ($4, $5)
+          AND status NOT IN ($2, $3)
           AND time_slot IS NOT NULL
-          AND id <> $3
+          AND id <> $4
         GROUP BY time_slot
       `,
-      [date, id, completedStatus, notCompletedStatus],
+      [date, completedStatus, notCompletedStatus, id],
     );
 
     const bookedCount = bookedRows.reduce(

@@ -134,7 +134,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
   const isGuestUser = user?.userType === 'guest';
   const tempIdentifier = user?.idNumber || user?.qrValue || null;
   const guestType = user?.program?.trim() || '';
-  const showDepartment = !isGuestUser && Boolean(user?.college?.trim());
+  const showCollege = !isGuestUser && Boolean(user?.college?.trim());
   const showProgram = !isGuestUser && Boolean(user?.program?.trim());
 
   return (
@@ -255,15 +255,15 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
                   </div>
                 )}
 
-                {(showDepartment || showProgram) && (
+                {(showCollege || showProgram) && (
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {showDepartment && (
+                    {showCollege && (
                       <div className="flex items-start gap-4">
                         <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
                           <Building2 size={18} />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">Department</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase">College</p>
                           <p className="font-bold text-slate-800">{user.college}</p>
                         </div>
                       </div>
@@ -274,7 +274,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
                           <GraduationCap size={18} />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">Program</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase">Department / Program</p>
                           <p className="font-bold text-slate-800">{user.program}</p>
                         </div>
                       </div>
