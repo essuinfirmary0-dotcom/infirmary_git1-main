@@ -2763,8 +2763,15 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
     const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
     const requestedScheduleState = evaluateScheduledAppointmentState(date, timeSlot);
-    if (requestedScheduleState.status !== 'upcoming') {
-      return res.status(409).json({ message: 'Appointments can only be booked for a future date and time slot.' });
+    if (requestedScheduleState.status === 'past') {
+      return res.status(409).json({
+        message: 'The selected appointment date and time slot is no longer available for booking.',
+      });
+    }
+    if (requestedScheduleState.status === 'unknown') {
+      return res.status(400).json({
+        message: 'The selected appointment time slot is invalid.',
+      });
     }
 
     const { rows: conflictingRows } = await pool.query(

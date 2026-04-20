@@ -657,6 +657,18 @@ export const BookingForm = ({
       return;
     }
     const selectedDate = format(date, 'yyyy-MM-dd');
+    const requestedScheduleState = evaluateScheduledAppointmentState(
+      selectedDate,
+      formData.timeSlot,
+    );
+    if (requestedScheduleState.status === 'past') {
+      toast.error('The selected time slot is no longer available for booking.');
+      return;
+    }
+    if (requestedScheduleState.status === 'unknown') {
+      toast.error('The selected time slot is invalid.');
+      return;
+    }
     const hasSameSlotConflict = (appointments || []).some(
       (apt) =>
         apt.id !== rescheduleAppointment?.id &&
