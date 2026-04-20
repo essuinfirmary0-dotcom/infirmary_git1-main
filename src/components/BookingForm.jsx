@@ -53,13 +53,68 @@ const guestPurposesByService = {
   Medical: ['School Requirement'],
 };
 
-const ENGINEERING_COLLEGE_NAME = 'College of Engineering';
-const DEFAULT_STUDENT_COLLEGES = [ENGINEERING_COLLEGE_NAME];
-const DEFAULT_STUDENT_PROGRAMS_BY_COLLEGE = {
-  [ENGINEERING_COLLEGE_NAME]: [
+const STUDENT_PROGRAM_GROUPS = {
+  'College of Education': [
+    'Bachelor of Secondary Education - Mathematics',
+    'Bachelor of Secondary Education - Social Studies',
+    'Bachelor of Secondary Education - Science',
+    'Bachelor of Secondary Education - English',
+    'Bachelor of Secondary Education - Filipino',
+    'Bachelor of Elementary Education',
+  ],
+  'College of Agriculture and Fisheries': [
+    'BS in Agriculture',
+    'BS in Agriculture - Animal Science',
+    'BS in Agriculture - Crop Science',
+    'BS in Fisheries',
+  ],
+  'College of Business and Accountancy': [
+    'BS in Accountancy',
+    'BS in Accounting Information System',
+    'BS in Business Administration',
+    'BS in Business Administration - Business Economics',
+    'BS in Business Administration - Human Resource Management',
+    'BS in Business Administration - Financial Management',
+    'BS in Business Administration - Marketing Management',
+    'BS in Entrepreneurship',
+  ],
+  'College of Engineering': [
     'BS in Civil Enginerring',
     'BS in Computer Engineering',
     'BS in Electrical Engineering',
+  ],
+  'College of Nursing and Allied Health Sciences': [
+    'BS in Nursing',
+    'Diploma in Midwifery',
+    'BS in Nutrition and Dietetics',
+  ],
+  'College of Information and Computing Studies': [
+    'BS in Information Technology',
+    'BS in Computer Science',
+    'Associate in Computer Technology',
+    'BS in Entertainment & Multimedia Computing - Digital Animation Technology',
+  ],
+  'College of Arts and Social Sciences': [
+    'BA in Political Science',
+    'BA in Communication',
+    'BS in Social Work',
+  ],
+  'College of Industrial Technology': [
+    'BS in Industrial Technology - Drafting Technology',
+    'BS in Industrial Technology - Automotive Technology',
+    'BS in Industrial Technology - Electrical Technology',
+    'BS in Industrial Technology - Electronics Technology',
+  ],
+  'College of Hospitality and Tourism Management': [
+    'BS in Hospitality Management',
+    'BS in Tourism Management',
+  ],
+  'College of Science and Environment': [
+    'BS in Biology',
+    'BS in Environmental Science',
+  ],
+  'College of Criminology': [
+    'BS in Criminology',
   ],
 };
 const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
@@ -67,26 +122,33 @@ const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
 const isStudentBookingUserType = (userType) =>
   STUDENT_BOOKING_USER_TYPES.has(String(userType || '').trim().toLowerCase());
 
-const buildStudentAcademicOptions = (departments = []) => {
-  const engineeringPrograms = [...new Set(
-    (Array.isArray(departments) ? departments : [])
-      .map((department) => String(department?.name || '').trim())
-      .filter(Boolean)
-      .filter((name) => /engineering/i.test(name)),
-  )].sort((left, right) => left.localeCompare(right));
+const normalizeDepartmentName = (name) =>
+  String(name || '')
+    .replace(/\s*-\s*/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  if (!engineeringPrograms.length) {
-    return {
-      colleges: DEFAULT_STUDENT_COLLEGES,
-      programsByCollege: DEFAULT_STUDENT_PROGRAMS_BY_COLLEGE,
-    };
-  }
+const buildStudentAcademicOptions = (departments = []) => {
+  const importedProgramLookup = new Map(
+    (Array.isArray(departments) ? departments : [])
+      .map((department) => normalizeDepartmentName(department?.name))
+      .filter(Boolean)
+      .map((name) => [name, name]),
+  );
+
+  const programsByCollege = Object.fromEntries(
+    Object.entries(STUDENT_PROGRAM_GROUPS).map(([college, programs]) => {
+      const resolvedPrograms = programs
+        .map((program) => importedProgramLookup.get(normalizeDepartmentName(program)) || program)
+        .map((program) => normalizeDepartmentName(program));
+
+      return [college, [...new Set(resolvedPrograms)].sort((left, right) => left.localeCompare(right))];
+    }),
+  );
 
   return {
-    colleges: [ENGINEERING_COLLEGE_NAME],
-    programsByCollege: {
-      [ENGINEERING_COLLEGE_NAME]: engineeringPrograms,
-    },
+    colleges: Object.keys(programsByCollege),
+    programsByCollege,
   };
 };
 
