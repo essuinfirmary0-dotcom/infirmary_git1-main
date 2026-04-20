@@ -282,7 +282,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
               <div className="pt-4 border-t border-slate-100">
                 <div className="flex items-start gap-3 text-sm text-slate-500">
                   <MapPin size={16} className="text-slate-400 mt-0.5" />
-                  <p>Main Infirmary Building, 2nd Floor, Room 204</p>
+                  <p>ESSU MAIN INFIRMARY BUILDING</p>
                 </div>
               </div>
 

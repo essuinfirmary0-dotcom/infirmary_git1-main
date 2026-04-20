@@ -328,7 +328,7 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
               <div className="pt-4 border-t border-slate-100">
                 <div className="flex items-start gap-3 text-sm text-slate-500">
                   <MapPin size={16} className="text-slate-400 mt-0.5" />
-                  <p>Infirmary Building</p>
+                  <p>ESSU MAIN INFIRMARY BUILDING</p>
                 </div>
               </div>
 
