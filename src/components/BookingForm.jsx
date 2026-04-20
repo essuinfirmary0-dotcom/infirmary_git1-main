@@ -930,28 +930,27 @@ export const BookingForm = ({
                 <Tag size={16} className="text-primary" />
                 Sub-category
               </label>
-              <select
-                required
-                className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                value={formData.subcategory}
-                onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
-                disabled={!formData.service || isSingleSubcategoryOption}
-              >
-                {!isSingleSubcategoryOption && (
+              {isSingleSubcategoryOption && formData.service ? (
+                <div className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 text-base font-medium text-slate-700">
+                  {formData.subcategory || availableSubcategories[0]}
+                </div>
+              ) : (
+                <select
+                  required
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                  value={formData.subcategory}
+                  onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
+                  disabled={!formData.service}
+                >
                   <option value="" disabled>
                     {formData.service ? 'Select sub-category' : 'Select a service first'}
                   </option>
-                )}
-                {availableSubcategories.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-              {isSingleSubcategoryOption && formData.service && (
-                <p className="text-xs text-slate-500 font-medium">
-                  {formData.service} appointments use Consultation only.
-                </p>
+                  {availableSubcategories.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
 
