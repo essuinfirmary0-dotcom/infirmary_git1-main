@@ -428,6 +428,7 @@ function mapQueueRow(row) {
     queueNumber: row.queue_number,
     appointmentId: row.appointment_id || null,
     createdAt: row.created_at || null,
+    checkedInAt: row.checked_in_at || null,
     status: mapQueueStatus(row.status),
     user: row.user_id
       ? {
@@ -453,6 +454,18 @@ function mapQueueRow(row) {
       }
       : null,
   };
+}
+
+async function ensureQueueCheckInTracking() {
+  await pool.query(`
+    ALTER TABLE public.queues
+    ADD COLUMN IF NOT EXISTS checked_in_at timestamp with time zone
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_queues_checked_in_at
+    ON public.queues(checked_in_at)
+  `);
 }
 
 function mapKioskAppointment(appointment) {
@@ -896,7 +909,8 @@ async function generateQueueNumberForDate(date) {
       SELECT COUNT(*)::int AS total
       FROM public.queues q
       LEFT JOIN public.appointments a ON a.id = q.appointment_id
-      WHERE COALESCE(a.appointment_date, DATE(q.created_at)) = $1
+      WHERE q.checked_in_at IS NOT NULL
+        AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila')) = $1
     `,
     [date],
   );
@@ -921,7 +935,25 @@ async function ensureQueueForAppointment(appointmentRow) {
   );
 
   if (existing.rows[0]) {
-    return existing.rows[0];
+    if (existing.rows[0].checked_in_at) {
+      return existing.rows[0];
+    }
+
+    const queueNumber = await generateQueueNumberForDate(appointmentRow.appointment_date);
+    const { rows } = await pool.query(
+      `
+        UPDATE public.queues
+        SET queue_number = $2,
+            status = 'Waiting',
+            checked_in_at = now(),
+            created_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [existing.rows[0].id, queueNumber],
+    );
+
+    return rows[0] || existing.rows[0];
   }
 
   const queueNumber = await generateQueueNumberForDate(appointmentRow.appointment_date);
@@ -931,15 +963,26 @@ async function ensureQueueForAppointment(appointmentRow) {
         user_id,
         queue_number,
         appointment_id,
-        status
+        status,
+        checked_in_at
       )
-      VALUES ($1, $2, $3, 'Waiting')
+      VALUES ($1, $2, $3, 'Waiting', now())
       RETURNING *
     `,
     [appointmentRow.user_id, queueNumber, appointmentRow.id],
   );
 
   return rows[0] || null;
+}
+
+function buildNonCheckInQueueLabel(appointmentRow) {
+  const appointmentCode = String(appointmentRow?.appointment_code || '').trim().toUpperCase();
+  if (appointmentCode) {
+    return `MISSED-${appointmentCode}`;
+  }
+
+  const fallback = String(appointmentRow?.id || 'QUEUE').replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 8);
+  return `MISSED-${fallback || 'ENTRY'}`;
 }
 
 async function ensureQueueForAppointmentWithClient(client, appointmentRow) {
@@ -961,7 +1004,6 @@ async function ensureQueueForAppointmentWithClient(client, appointmentRow) {
     return existing.rows[0];
   }
 
-  const queueNumber = await generateQueueNumberForDate(appointmentRow.appointment_date);
   const { rows } = await client.query(
     `
       INSERT INTO public.queues (
@@ -970,10 +1012,10 @@ async function ensureQueueForAppointmentWithClient(client, appointmentRow) {
         appointment_id,
         status
       )
-      VALUES ($1, $2, $3, 'Waiting')
+      VALUES ($1, $2, $3, 'Cancelled')
       RETURNING *
     `,
-    [appointmentRow.user_id, queueNumber, appointmentRow.id],
+    [appointmentRow.user_id, buildNonCheckInQueueLabel(appointmentRow), appointmentRow.id],
   );
 
   return rows[0] || null;
@@ -1045,26 +1087,6 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
   );
 
   return rows[0] || null;
-}
-
-async function backfillMissingQueues() {
-  const completedStatus = await toDatabaseAppointmentStatus('Completed');
-  const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
-  const { rows } = await pool.query(
-    `
-      SELECT a.*
-      FROM public.appointments a
-      LEFT JOIN public.queues q ON q.appointment_id = a.id
-      WHERE q.id IS NULL
-        AND a.status NOT IN ($1, $2)
-      ORDER BY a.appointment_date ASC, a.created_at ASC
-    `,
-    [completedStatus, notCompletedStatus],
-  );
-
-  for (const appointment of rows) {
-    await ensureQueueForAppointment(appointment);
-  }
 }
 
 function mapNotificationRow(row) {
@@ -3619,9 +3641,10 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
 
   if (date) {
     values.push(date);
-    conditions.push(`COALESCE(a.appointment_date, DATE(q.created_at)) = $${values.length}`);
+    conditions.push(`COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $${values.length}`);
   }
 
+  conditions.push('q.checked_in_at IS NOT NULL');
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -3633,6 +3656,7 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
           q.queue_number,
           q.appointment_id,
           q.created_at,
+          q.checked_in_at,
           q.status,
           u.firstname AS user_firstname,
           u.lastname AS user_lastname,
@@ -3652,7 +3676,7 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
         LEFT JOIN public.users_auth u ON u.id = q.user_id
         LEFT JOIN public.appointments a ON a.id = q.appointment_id
         ${whereClause}
-        ORDER BY COALESCE(a.appointment_date, DATE(q.created_at)) ASC, q.created_at ASC, q.queue_number ASC
+        ORDER BY COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) ASC, q.checked_in_at ASC NULLS LAST, q.created_at ASC, q.queue_number ASC
       `,
       values,
     );
@@ -3754,6 +3778,7 @@ app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
           q.queue_number,
           q.appointment_id,
           q.created_at,
+          q.checked_in_at,
           q.status,
           u.firstname AS user_firstname,
           u.lastname AS user_lastname,
@@ -3773,8 +3798,9 @@ app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
         LEFT JOIN public.users_auth u ON u.id = q.user_id
         LEFT JOIN public.appointments a ON a.id = q.appointment_id
         WHERE q.user_id = $1
-          AND COALESCE(a.appointment_date, DATE(q.created_at)) = $2
-        ORDER BY q.created_at ASC, q.queue_number ASC
+          AND q.checked_in_at IS NOT NULL
+          AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $2
+        ORDER BY q.checked_in_at ASC, q.created_at ASC, q.queue_number ASC
       `,
       [req.authUser.id, today],
     );
@@ -3890,14 +3916,14 @@ async function runStartupMaintenance() {
     console.log('Running syncDefaultSlotDefinitions...');
     await syncDefaultSlotDefinitions();
 
+    console.log('Running ensureQueueCheckInTracking...');
+    await ensureQueueCheckInTracking();
+
     console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();
 
     console.log('Running ensureMedicalRecordAttachmentLabels...');
     await ensureMedicalRecordAttachmentLabels();
-
-    console.log('Running backfillMissingQueues...');
-    await backfillMissingQueues();
 
     console.log('Running markMissedAppointmentsAsNotCompleted...');
     await markMissedAppointmentsAsNotCompleted();
