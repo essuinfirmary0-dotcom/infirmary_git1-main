@@ -36,7 +36,11 @@ const guestServices = [
   { id: 'Medical', label: 'Medical', description: 'Guest medical appointment booking' },
 ];
 
-const SUBCATEGORY_OPTIONS = ['Consultation', 'Certification'];
+const SUBCATEGORY_OPTIONS_BY_SERVICE = {
+  Medical: ['Certification', 'Consultation'],
+  Dental: ['Consultation'],
+  Nutrition: ['Consultation'],
+};
 
 const commonPurposesByService = {
   Dental: ['Tooth Extraction'],
@@ -51,6 +55,17 @@ const guestPurposesByService = {
 const MAX_SLOTS = 50;
 const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM', '4:00 PM - 7:00 PM', '7:00 PM - 11:00 PM'];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
+
+const getAvailableSubcategoryOptions = (service) =>
+  SUBCATEGORY_OPTIONS_BY_SERVICE[service] || [];
+
+const getDefaultSubcategoryForService = (service) => {
+  const options = getAvailableSubcategoryOptions(service);
+  return options.length === 1 ? options[0] : '';
+};
+
+const supportsRequirementUploads = (service, subcategory) =>
+  service === 'Medical' && subcategory === 'Certification';
 
 const isInfirmaryClosedOnDate = (d) => {
   const day = getDay(d);
@@ -484,13 +499,45 @@ export const BookingForm = ({
   const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
   const availablePurposes = formData.service ? (purposeOptions[formData.service] || []) : [];
-  const isMedicalService = formData.service === 'Medical';
+  const availableSubcategories = getAvailableSubcategoryOptions(formData.service);
+  const isSingleSubcategoryOption = availableSubcategories.length === 1;
   const requirementFiles = [...requirementFileGroups.chestXray, ...requirementFileGroups.urinalysis];
   const requirementUploadItems = [
     ...requirementFileGroups.chestXray.map((file) => ({ file, label: 'Chest Xray' })),
     ...requirementFileGroups.urinalysis.map((file) => ({ file, label: 'Urinalyses' })),
   ];
-  const requiresMedicalUpload = isMedicalService && !isRescheduleMode && requirementFiles.length === 0;
+  const shouldShowRequirementUpload = supportsRequirementUploads(
+    formData.service,
+    formData.subcategory,
+  );
+
+  useEffect(() => {
+    const nextOptions = getAvailableSubcategoryOptions(formData.service);
+    const nextDefault = nextOptions.length === 1 ? nextOptions[0] : '';
+
+    if (!formData.service) {
+      if (formData.subcategory) {
+        setFormData((prev) => ({ ...prev, subcategory: '' }));
+      }
+      return;
+    }
+
+    if (!nextOptions.includes(formData.subcategory)) {
+      setFormData((prev) => ({ ...prev, subcategory: nextDefault }));
+    }
+  }, [formData.service, formData.subcategory]);
+
+  useEffect(() => {
+    if (shouldShowRequirementUpload || requirementFiles.length === 0) {
+      return;
+    }
+
+    setRequirementFileGroups({
+      chestXray: [],
+      urinalysis: [],
+    });
+  }, [requirementFiles.length, shouldShowRequirementUpload]);
+
   useEffect(() => {
     if (!formData.service) {
       if (formData.purpose) {
@@ -625,11 +672,6 @@ export const BookingForm = ({
       toast.error('Selected time slot is no longer available.');
       return;
     }
-    if (requiresMedicalUpload) {
-      toast.error('Please upload at least one medical requirement file.');
-      return;
-    }
-
     if (isInfirmaryClosedOnDate(date)) {
       toast.error('The infirmary is closed on this day. Please select an open day from Monday to Thursday.');
       return;
@@ -669,7 +711,7 @@ export const BookingForm = ({
         notes: [
           isGuestUser ? `Course: ${formData.course.trim()}` : '',
           formData.notes?.trim() || '',
-          isMedicalService && requirementUploadItems.length > 0
+          shouldShowRequirementUpload && requirementUploadItems.length > 0
             ? `Submitted requirement files: ${requirementUploadItems.map((item) => `${item.label}: ${item.file.name}`).join(', ')}`
             : '',
         ]
@@ -864,13 +906,12 @@ export const BookingForm = ({
                     disabled={isRescheduleMode}
                     onClick={() => {
                       if (isRescheduleMode) return;
-                      setFormData({ ...formData, service: s.id, subcategory: '', purpose: '' });
-                      if (s.id !== 'Medical') {
-                        setRequirementFileGroups({
-                          chestXray: [],
-                          urinalysis: [],
-                        });
-                      }
+                      setFormData({
+                        ...formData,
+                        service: s.id,
+                        subcategory: getDefaultSubcategoryForService(s.id),
+                        purpose: '',
+                      });
                     }}
                     className={`p-4 rounded-2xl border text-left transition-all ${formData.service === s.id
                       ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
@@ -890,18 +931,28 @@ export const BookingForm = ({
                 Sub-category
               </label>
               <select
-  required
-  className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
-  value={formData.subcategory}
-  onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
->
-  <option value="" disabled>Select sub-category</option>
-  {SUBCATEGORY_OPTIONS.map((option) => (
-    <option key={option} value={option}>
-      {option}
-    </option>
-  ))}
-</select>
+                required
+                className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                value={formData.subcategory}
+                onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
+                disabled={!formData.service || isSingleSubcategoryOption}
+              >
+                {!isSingleSubcategoryOption && (
+                  <option value="" disabled>
+                    {formData.service ? 'Select sub-category' : 'Select a service first'}
+                  </option>
+                )}
+                {availableSubcategories.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              {isSingleSubcategoryOption && formData.service && (
+                <p className="text-xs text-slate-500 font-medium">
+                  {formData.service} appointments use Consultation only.
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -936,7 +987,7 @@ export const BookingForm = ({
               />
             </div>
 
-            {isMedicalService && (
+            {shouldShowRequirementUpload && (
               <div className="space-y-3">
                 <label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
                   Medical Requirements Upload
@@ -954,7 +1005,6 @@ export const BookingForm = ({
                     <input
                       type="file"
                       multiple
-                      required={requiresMedicalUpload}
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                       onChange={(e) => handleRequirementGroupChange('chestXray', e.target.files)}
                       className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
@@ -973,7 +1023,6 @@ export const BookingForm = ({
                     <input
                       type="file"
                       multiple
-                      required={requiresMedicalUpload}
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                       onChange={(e) => handleRequirementGroupChange('urinalysis', e.target.files)}
                       className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
@@ -1001,9 +1050,9 @@ export const BookingForm = ({
               disabled={
                 isSubmitting ||
                 !formData.service ||
+                !formData.subcategory ||
                 !formData.purpose ||
                 !formData.timeSlot ||
-                requiresMedicalUpload ||
                 (isGuestUser && (!formData.patientName.trim() || !formData.course.trim()))
               }
               className={`w-full py-4 sm:py-5 rounded-xl sm:rounded-2xl font-black text-base sm:text-lg text-white transition-all flex items-center justify-center gap-3 shadow-xl ${isSubmitting ? 'bg-emerald-500' : 'bg-primary hover:bg-primary-hover shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'

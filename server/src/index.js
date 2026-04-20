@@ -84,6 +84,31 @@ function normalizeIdentifier(value) {
   return String(value || '').trim();
 }
 
+const APPOINTMENT_SUBCATEGORY_OPTIONS = Object.freeze({
+  Medical: ['Certification', 'Consultation'],
+  Dental: ['Consultation'],
+  Nutrition: ['Consultation'],
+});
+
+function getAllowedAppointmentSubcategories(service) {
+  return APPOINTMENT_SUBCATEGORY_OPTIONS[normalizeIdentifier(service)] || [];
+}
+
+function isValidAppointmentService(service) {
+  return getAllowedAppointmentSubcategories(service).length > 0;
+}
+
+function isValidAppointmentSubcategory(service, subcategory) {
+  return getAllowedAppointmentSubcategories(service).includes(normalizeIdentifier(subcategory));
+}
+
+function appointmentAllowsRequirementUploads(service, subcategory) {
+  return (
+    normalizeIdentifier(service) === 'Medical' &&
+    normalizeIdentifier(subcategory) === 'Certification'
+  );
+}
+
 function normalizeCredential(value) {
   return String(value || '').trim();
 }
@@ -2718,6 +2743,19 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
   if (!patientName || !service || !subcategory || !purpose || !date || !timeSlot) {
     return res.status(400).json({ message: 'Missing required appointment fields.' });
   }
+  if (!isValidAppointmentService(service)) {
+    return res.status(400).json({ message: 'Invalid appointment service selected.' });
+  }
+  if (!isValidAppointmentSubcategory(service, subcategory)) {
+    return res.status(400).json({
+      message: `${service} appointments only support ${getAllowedAppointmentSubcategories(service).join(' or ')}.`,
+    });
+  }
+  if (attachments.length > 0 && !appointmentAllowsRequirementUploads(service, subcategory)) {
+    return res.status(400).json({
+      message: 'Requirement file uploads are only allowed for Medical Certification appointments.',
+    });
+  }
 
   try {
     await markMissedAppointmentsAsNotCompleted();
@@ -2851,6 +2889,19 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
   if (!id || !patientName || !service || !subcategory || !purpose || !date || !timeSlot) {
     return res.status(400).json({ message: 'Missing required appointment fields for reschedule.' });
   }
+  if (!isValidAppointmentService(service)) {
+    return res.status(400).json({ message: 'Invalid appointment service selected.' });
+  }
+  if (!isValidAppointmentSubcategory(service, subcategory)) {
+    return res.status(400).json({
+      message: `${service} appointments only support ${getAllowedAppointmentSubcategories(service).join(' or ')}.`,
+    });
+  }
+  if (attachments.length > 0 && !appointmentAllowsRequirementUploads(service, subcategory)) {
+    return res.status(400).json({
+      message: 'Requirement file uploads are only allowed for Medical Certification appointments.',
+    });
+  }
 
   try {
     await markMissedAppointmentsAsNotCompleted();
@@ -2965,8 +3016,10 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
       );
 
       updatedRow = updated.rows[0];
-      if (attachments.length > 0) {
+      if (appointmentAllowsRequirementUploads(service, subcategory) && attachments.length > 0) {
         await replaceAppointmentAttachments(client, id, attachments);
+      } else if (!appointmentAllowsRequirementUploads(service, subcategory)) {
+        await replaceAppointmentAttachments(client, id, []);
       }
 
       await client.query('COMMIT');
@@ -3193,7 +3246,7 @@ app.post('/api/consultations/:userId/logs', loadAuthenticatedUser, async (req, r
   }
 });
 
-app.get('/api/medical-records/patients', loadAuthenticatedUser, async (_req, res) => {
+app.get('/api/medical-records/patients', loadAuthenticatedUser, async (req, res) => {
   if (!ensureAdmin(req, res, 'Only admins can view medical record patients.')) {
     return;
   }
@@ -3330,6 +3383,25 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
     certificateIssued ||
     normalizedRecordLabel.includes('certification') ||
     normalizedRecordLabel.includes('certificate');
+  const appointmentMetadata =
+    appointmentId
+      ? await pool
+          .query(
+            `
+              SELECT service, subcategory
+              FROM public.appointments
+              WHERE id = $1
+              LIMIT 1
+            `,
+            [appointmentId],
+          )
+          .then((result) => result.rows[0] || null)
+          .catch(() => null)
+      : null;
+  const appointmentRequiresRequirementFiles = appointmentAllowsRequirementUploads(
+    appointmentMetadata?.service,
+    appointmentMetadata?.subcategory,
+  );
 
   const appointmentAttachmentSource =
     appointmentId
@@ -3339,12 +3411,17 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
   if (!userId || !title) {
     return res.status(400).json({ message: 'User id and title are required.' });
   }
-  if (isCertificationRecord && attachments.length === 0 && appointmentAttachmentSource.length === 0) {
+  if (
+    isCertificationRecord &&
+    appointmentRequiresRequirementFiles &&
+    attachments.length === 0 &&
+    appointmentAttachmentSource.length === 0
+  ) {
     return res.status(400).json({
       message: 'At least one uploaded requirement file from the user appointment is required before issuing a medical certificate.',
     });
   }
-  if (isCertificationRecord && !isHardcopyVerified) {
+  if (isCertificationRecord && appointmentRequiresRequirementFiles && !isHardcopyVerified) {
     return res.status(400).json({
       message: 'Hardcopy verification is required before issuing a medical certificate.',
     });
@@ -3380,8 +3457,12 @@ app.post('/api/medical-records/:userId/records', loadAuthenticatedUser, async (r
     const primaryAttachment = savedAttachments[0] || null;
     const finalNotes = [
       notes || '',
-      isCertificationRecord ? `Hardcopy verification: ${isHardcopyVerified ? 'Verified' : 'Not verified'}` : '',
-      isCertificationRecord && certificateIssued ? 'Certificate issuance: Completed' : '',
+      isCertificationRecord && appointmentRequiresRequirementFiles
+        ? `Hardcopy verification: ${isHardcopyVerified ? 'Verified' : 'Not verified'}`
+        : '',
+      isCertificationRecord && appointmentRequiresRequirementFiles && certificateIssued
+        ? 'Certificate issuance: Completed'
+        : '',
     ]
       .filter(Boolean)
       .join('\n');

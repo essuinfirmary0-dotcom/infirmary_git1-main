@@ -114,9 +114,9 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
   const fileInputRef = useRef(null);
 
   const subcategories = {
-    'Dental': ['Tooth Extraction', 'Certification'],
+    'Dental': ['Consultation'],
     'Medical': ['Consultation', 'Certification'],
-    'Nutrition': ['Consultation', 'Certification']
+    'Nutrition': ['Consultation']
   };
 
   // Filter appointments by date range, service, subcategory, status, and search query

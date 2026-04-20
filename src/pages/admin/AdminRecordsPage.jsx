@@ -36,6 +36,13 @@ function formatRecordDate(recordedAt) {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
+function appointmentNeedsRequirementFiles(appointment) {
+  return (
+    String(appointment?.service || '').toLowerCase() === 'medical' &&
+    String(appointment?.subcategory || '').toLowerCase() === 'certification'
+  );
+}
+
 function buildQueueDraft(queueContext) {
   const service = queueContext?.appointment?.service || 'Consultation';
   const subcategory = queueContext?.appointment?.subcategory;
@@ -51,7 +58,7 @@ function buildQueueDraft(queueContext) {
     .filter((line) => line && !/^Submitted requirement files:/i.test(line))
     .join('\n');
   const serviceLabel = subcategory ? `${service} - ${subcategory}` : service;
-  const isCertification = String(subcategory || '').toLowerCase() === 'certification';
+  const isCertification = appointmentNeedsRequirementFiles(queueContext?.appointment);
 
   return {
     title: isCertification ? `${service} Certification Report` : `${serviceLabel} Medical Report`,
@@ -252,9 +259,12 @@ export const AdminRecordsPage = () => {
   const userRecords = apiRecords;
   const isViewingRecord = selectedRecordTile && !isAddingRecord;
   const hasAppointmentAttachmentContext = Boolean(queueContext?.appointment?.id);
+  const appointmentRequiresRequirementFiles = appointmentNeedsRequirementFiles(
+    queueContext?.appointment,
+  );
   const isCertificationFlow =
     hasAppointmentAttachmentContext &&
-    String(queueContext?.appointment?.subcategory || '').toLowerCase() === 'certification';
+    appointmentRequiresRequirementFiles;
   const appointmentAttachmentItems = appointmentAttachments || [];
   const selectedRecordAttachments =
     selectedRecordTile?.attachments?.length > 0
@@ -281,12 +291,12 @@ export const AdminRecordsPage = () => {
   };
 
   const renderAppointmentRequirementFiles = () => {
-    if (!hasAppointmentAttachmentContext) return null;
+    if (!hasAppointmentAttachmentContext || !appointmentRequiresRequirementFiles) return null;
 
     if (appointmentAttachmentItems.length === 0) {
       return (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-semibold text-amber-800">
-          No requirement file has been uploaded by the user for this appointment yet.
+          The patient has not uploaded any requirement file for this appointment yet.
         </div>
       );
     }
@@ -832,7 +842,7 @@ export const AdminRecordsPage = () => {
                       {recordDefaultNotes || 'No default request details available.'}
                     </div>
                   </div>
-                  {hasAppointmentAttachmentContext && (
+                  {hasAppointmentAttachmentContext && appointmentRequiresRequirementFiles && (
                     <div className="space-y-2">
                       <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">
                         Requirement Files (Clickable)
