@@ -2942,7 +2942,7 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
   }
 });
 
-app.get('/api/consultations/patients', loadAuthenticatedUser, async (_req, res) => {
+app.get('/api/consultations/patients', loadAuthenticatedUser, async (req, res) => {
   if (!ensureAdmin(req, res, 'Only admins can view consultation patients.')) {
     return;
   }

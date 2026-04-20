@@ -211,6 +211,13 @@ export const AppProvider = ({ children }) => {
       setConsultationPatients([]);
       return;
     }
+
+    const isAdmin = ['admin', 'super_admin'].includes(user?.userType || user?.role);
+    if (!isAdmin) {
+      setConsultationPatients([]);
+      return;
+    }
+
     try {
       const data = await consultationService.getPatients();
       setConsultationPatients(data || []);
