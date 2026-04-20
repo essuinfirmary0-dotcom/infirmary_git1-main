@@ -49,7 +49,7 @@ const commonPurposesByService = {
 };
 
 const guestPurposesByService = {
-  Medical: ['Freshmen'],
+  Medical: ['School Requirement'],
 };
 
 const MAX_SLOTS = 50;
@@ -97,10 +97,10 @@ const parseTimeSlotEndMinutes = (slotLabel) => {
 
 const isActiveAppointmentStatus = (status) => !['Completed', 'Not Completed'].includes(String(status || '').trim());
 
-const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, guestCourse, isRescheduleMode = false }) => {
+const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, guestType, isRescheduleMode = false }) => {
   if (!appointment) return null;
-  const showDepartment = Boolean(user?.college?.trim());
-  const showProgram = Boolean(user?.program?.trim());
+  const showDepartment = !isGuestUser && Boolean(user?.college?.trim());
+  const showProgram = !isGuestUser && Boolean(user?.program?.trim());
   const tempIdentifier = user?.idNumber || user?.qrValue || null;
   const guestQrCode = user?.qrCode || null;
 
@@ -293,8 +293,8 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
                         <p className="text-xl font-black text-slate-900">{tempIdentifier || 'Not available'}</p>
                       </div>
                       <div>
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Course</p>
-                        <p className="font-bold text-slate-800">{guestCourse || user?.program || 'Not provided'}</p>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Type of Guest</p>
+                        <p className="font-bold text-slate-800">{guestType || user?.program || 'Not provided'}</p>
                       </div>
                       <p className="text-xs text-slate-500">
                         Use this temporary ID or QR code at the kiosk when you check in for your appointment.
@@ -363,7 +363,7 @@ const ConfirmationModal = ({ isOpen, appointment, onClose, user, isGuestUser, gu
 
 const initialFormData = (user) => ({
   patientName: user?.name || '',
-  course: user?.program || '',
+  guestType: user?.program || '',
   service: user?.userType === 'guest' ? 'Medical' : '',
   subcategory: '',
   purpose: '',
@@ -468,7 +468,7 @@ export const BookingForm = ({
       setFormData(prev => ({
         ...prev,
         patientName: user?.userType === 'guest' ? prev.patientName : (user?.name || prev.patientName),
-        course: user?.program || prev.course,
+        guestType: user?.program || prev.guestType,
         service: user?.userType === 'guest' ? 'Medical' : prev.service,
       }));
     }
@@ -483,7 +483,7 @@ export const BookingForm = ({
     setFormData((prev) => ({
       ...prev,
       patientName: isGuestUser ? (prev.patientName || user?.name || '') : (user?.name || rescheduleAppointment.patientName || prev.patientName),
-      course: user?.program || prev.course,
+      guestType: user?.program || prev.guestType,
       service: rescheduleAppointment.service || prev.service,
       subcategory: rescheduleAppointment.subcategory || '',
       purpose: rescheduleAppointment.purpose || '',
@@ -644,8 +644,8 @@ export const BookingForm = ({
       toast.error('Please enter your full name.');
       return;
     }
-    if (isGuestUser && !formData.course.trim()) {
-      toast.error('Please enter your course.');
+    if (isGuestUser && !formData.guestType.trim()) {
+      toast.error('Please enter the type of guest.');
       return;
     }
     if (!formData.service) {
@@ -705,7 +705,7 @@ export const BookingForm = ({
           phone: '',
           address: '',
           college: '',
-          program: formData.course.trim(),
+          program: formData.guestType.trim(),
           pictureUrl: '',
         });
 
@@ -721,7 +721,7 @@ export const BookingForm = ({
         time: formData.timeSlot,
         requirementFiles: requirementUploadItems,
         notes: [
-          isGuestUser ? `Course: ${formData.course.trim()}` : '',
+          isGuestUser ? `Type of Guest: ${formData.guestType.trim()}` : '',
           formData.notes?.trim() || '',
           shouldShowRequirementUpload && requirementUploadItems.length > 0
             ? `Submitted requirement files: ${requirementUploadItems.map((item) => `${item.label}: ${item.file.name}`).join(', ')}`
@@ -759,7 +759,7 @@ export const BookingForm = ({
         onClose={handleConfirmationDone}
         user={user}
         isGuestUser={isGuestUser}
-        guestCourse={formData.course}
+        guestType={formData.guestType}
         isRescheduleMode={isRescheduleMode}
       />
 
@@ -885,15 +885,15 @@ export const BookingForm = ({
                 <div className="space-y-3">
                   <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
                     <GraduationCap size={16} className="text-primary" />
-                    Course
+                    Type of Guest
                   </label>
                   <input
                     type="text"
                     required
                     className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
-                    placeholder="Enter your course"
-                    value={formData.course}
-                    onChange={(e) => setFormData({ ...formData, course: e.target.value })}
+                    placeholder="Example: Incoming Freshmen"
+                    value={formData.guestType}
+                    onChange={(e) => setFormData({ ...formData, guestType: e.target.value })}
                   />
                 </div>
 
@@ -1064,7 +1064,7 @@ export const BookingForm = ({
                 !formData.subcategory ||
                 !formData.purpose ||
                 !formData.timeSlot ||
-                (isGuestUser && (!formData.patientName.trim() || !formData.course.trim()))
+                (isGuestUser && (!formData.patientName.trim() || !formData.guestType.trim()))
               }
               className={`w-full py-4 sm:py-5 rounded-xl sm:rounded-2xl font-black text-base sm:text-lg text-white transition-all flex items-center justify-center gap-3 shadow-xl ${isSubmitting ? 'bg-emerald-500' : 'bg-primary hover:bg-primary-hover shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'
                 }`}

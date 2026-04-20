@@ -12,6 +12,8 @@ import { printKioskReceipt } from '../utils/kioskPrintReceipt';
 function KioskResultBlock({ kioskResult, tone = 'light' }) {
   if (!kioskResult) return null;
   const isDark = tone === 'dark';
+  const isGuestUser = kioskResult.user?.userType === 'guest';
+  const guestType = kioskResult.user?.program?.trim() || '';
   return (
     <div
       className={`mt-3 border-t pt-3 space-y-2 ${
@@ -51,11 +53,14 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
         {kioskResult.user?.employeeNumber && (
           <p>Employee No.: {kioskResult.user.employeeNumber}</p>
         )}
-        {kioskResult.user?.college?.trim() && (
+        {!isGuestUser && kioskResult.user?.college?.trim() && (
           <p>College: {kioskResult.user.college}</p>
         )}
-        {kioskResult.user?.program?.trim() && (
+        {!isGuestUser && kioskResult.user?.program?.trim() && (
           <p>Program: {kioskResult.user.program}</p>
+        )}
+        {isGuestUser && guestType && (
+          <p>Type of Guest: {guestType}</p>
         )}
         {kioskResult.hasAppointmentToday && kioskResult.appointment ? (
           <div
@@ -149,8 +154,11 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
   if (!kioskResult) return null;
 
   const pct = (secondsLeft / RECEIPT_AUTO_CLOSE_SECONDS) * 100;
-  const showCollege = Boolean(kioskResult.user?.college?.trim());
-  const showProgram = Boolean(kioskResult.user?.program?.trim());
+  const isGuestUser = kioskResult.user?.userType === 'guest';
+  const guestType = kioskResult.user?.program?.trim() || '';
+  const showCollege = !isGuestUser && Boolean(kioskResult.user?.college?.trim());
+  const showProgram = !isGuestUser && Boolean(kioskResult.user?.program?.trim());
+  const showGuestType = isGuestUser && Boolean(guestType);
 
   const handlePrint = () => {
     printKioskReceipt(kioskResult);
@@ -210,7 +218,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
               </span>
             )}
           </div>
-          {(showCollege || showProgram) && (
+          {(showCollege || showProgram || showGuestType) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-200/80">
               {showCollege && (
                 <div className="flex items-start gap-2 text-xs text-slate-700">
@@ -231,6 +239,17 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                       Program
                     </p>
                     <p className="font-semibold text-slate-800 leading-snug">{kioskResult.user.program}</p>
+                  </div>
+                </div>
+              )}
+              {showGuestType && (
+                <div className="flex items-start gap-2 text-xs text-slate-700">
+                  <GraduationCap size={14} className="text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      Type of Guest
+                    </p>
+                    <p className="font-semibold text-slate-800 leading-snug">{guestType}</p>
                   </div>
                 </div>
               )}

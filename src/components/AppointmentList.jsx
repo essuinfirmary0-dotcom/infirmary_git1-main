@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, XCircle, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard } from 'lucide-react';
+import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, XCircle, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
 
@@ -133,6 +133,9 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
   if (!appointment) return null;
   const isGuestUser = user?.userType === 'guest';
   const tempIdentifier = user?.idNumber || user?.qrValue || null;
+  const guestType = user?.program?.trim() || '';
+  const showDepartment = !isGuestUser && Boolean(user?.college?.trim());
+  const showProgram = !isGuestUser && Boolean(user?.program?.trim());
 
   return (
     <AnimatePresence>
@@ -239,6 +242,45 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user }) => {
                     <p className="font-bold text-slate-800">{appointment.purpose}</p>
                   </div>
                 </div>
+
+                {isGuestUser && (
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
+                      <GraduationCap size={18} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Type of Guest</p>
+                      <p className="font-bold text-slate-800">{guestType || 'Not provided'}</p>
+                    </div>
+                  </div>
+                )}
+
+                {(showDepartment || showProgram) && (
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                    {showDepartment && (
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
+                          <Building2 size={18} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase">Department</p>
+                          <p className="font-bold text-slate-800">{user.college}</p>
+                        </div>
+                      </div>
+                    )}
+                    {showProgram && (
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
+                          <GraduationCap size={18} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase">Program</p>
+                          <p className="font-bold text-slate-800">{user.program}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {isGuestUser && (
                   <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4">

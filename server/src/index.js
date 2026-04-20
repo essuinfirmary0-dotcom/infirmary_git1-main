@@ -184,6 +184,10 @@ function getEffectiveUserType(user) {
   return user?.user_type || user?.role || null;
 }
 
+function isGuestUserType(userType) {
+  return String(userType || '').trim().toLowerCase() === 'guest';
+}
+
 function getUserDisplayName(user) {
   return [user?.firstname, user?.lastname].filter(Boolean).join(' ') || user?.email || user?.id_number || 'Unknown User';
 }
@@ -2734,7 +2738,10 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
   const patientName = normalizeIdentifier(req.body?.patientName) || [req.authUser.firstname, req.authUser.lastname].filter(Boolean).join(' ');
   const service = normalizeIdentifier(req.body?.service);
   const subcategory = normalizeIdentifier(req.body?.subcategory);
-  const purpose = normalizeIdentifier(req.body?.purpose);
+  const requestedPurpose = normalizeIdentifier(req.body?.purpose);
+  const purpose = isGuestUserType(getEffectiveUserType(req.authUser))
+    ? 'School Requirement'
+    : requestedPurpose;
   const date = normalizeIdentifier(req.body?.date);
   const timeSlot = formatTimeSlotLabel(normalizeIdentifier(req.body?.time));
   const notes = normalizeIdentifier(req.body?.notes);
@@ -2887,7 +2894,10 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
   const patientName = normalizeIdentifier(req.body?.patientName) || [req.authUser.firstname, req.authUser.lastname].filter(Boolean).join(' ');
   const service = normalizeIdentifier(req.body?.service);
   const subcategory = normalizeIdentifier(req.body?.subcategory);
-  const purpose = normalizeIdentifier(req.body?.purpose);
+  const requestedPurpose = normalizeIdentifier(req.body?.purpose);
+  const purpose = isGuestUserType(getEffectiveUserType(req.authUser))
+    ? 'School Requirement'
+    : requestedPurpose;
   const date = normalizeIdentifier(req.body?.date);
   const timeSlot = formatTimeSlotLabel(normalizeIdentifier(req.body?.time));
   const notes = normalizeIdentifier(req.body?.notes);

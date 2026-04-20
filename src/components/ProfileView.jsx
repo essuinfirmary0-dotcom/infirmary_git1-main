@@ -130,6 +130,7 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   };
 
   const userTypeLabel = getUserTypeLabel(user?.userType);
+  const isGuestUser = user?.userType === 'guest';
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 min-w-0">
@@ -391,14 +392,19 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                 <span className="font-black text-slate-900">{user.employeeNumber}</span>
               </p>
             )}
-            {user?.college && (
+            {!isGuestUser && user?.college && (
               <p className="text-slate-600">
                 <span className="font-semibold">College:</span> {user.college}
               </p>
             )}
-            {user?.program && (
+            {!isGuestUser && user?.program && (
               <p className="text-slate-600">
                 <span className="font-semibold">Program:</span> {user.program}
+              </p>
+            )}
+            {isGuestUser && user?.program && (
+              <p className="text-slate-600">
+                <span className="font-semibold">Type of Guest:</span> {user.program}
               </p>
             )}
           </div>

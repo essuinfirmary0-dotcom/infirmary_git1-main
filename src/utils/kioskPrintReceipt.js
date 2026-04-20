@@ -11,13 +11,15 @@ function escapeHtml(s) {
 function buildKioskReceiptDocumentHtml(kioskResult) {
   const u = kioskResult.user || {};
   const apt = kioskResult.appointment;
+  const isGuestUser = String(u.userType || '').trim().toLowerCase() === 'guest';
   const name = escapeHtml(u.name || 'Guest');
   const queue = escapeHtml(kioskResult.queueNumber ?? '');
   const dateLine = escapeHtml(kioskResult.checkInDateDisplay || '');
   const student = u.studentNumber ? escapeHtml(u.studentNumber) : '';
   const employee = u.employeeNumber ? escapeHtml(u.employeeNumber) : '';
-  const college = u.college?.trim() ? escapeHtml(u.college) : '';
-  const program = u.program?.trim() ? escapeHtml(u.program) : '';
+  const college = !isGuestUser && u.college?.trim() ? escapeHtml(u.college) : '';
+  const program = !isGuestUser && u.program?.trim() ? escapeHtml(u.program) : '';
+  const guestType = isGuestUser && u.program?.trim() ? escapeHtml(u.program) : '';
 
   let appointmentBlock = '';
   if (kioskResult.hasAppointmentToday && apt) {
@@ -48,6 +50,9 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
     : '';
   const programLine = program
     ? `<div style="font-size:11px;"><strong>Program:</strong> ${program}</div>`
+    : '';
+  const guestTypeLine = guestType
+    ? `<div style="font-size:11px;"><strong>Type of Guest:</strong> ${guestType}</div>`
     : '';
 
   return `<!DOCTYPE html>
@@ -100,6 +105,7 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
     <div class="hr"></div>
     <div class="name">${name}</div>
     ${idLine}
+    ${guestTypeLine}
     ${collegeLine}
     ${programLine}
     ${appointmentBlock}
