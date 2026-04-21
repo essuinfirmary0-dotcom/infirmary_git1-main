@@ -8,6 +8,36 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+export function buildKioskReceiptPayload(kioskResult) {
+  if (!kioskResult) return null;
+
+  const user = kioskResult.user || {};
+  const appointment = kioskResult.appointment || null;
+
+  return {
+    queueNumber: kioskResult.queueNumber || '',
+    checkInDateDisplay: kioskResult.checkInDateDisplay || '',
+    hasAppointmentToday: Boolean(kioskResult.hasAppointmentToday && appointment),
+    user: {
+      name: user.name || 'Guest',
+      userType: user.userType || '',
+      studentNumber: user.studentNumber || '',
+      employeeNumber: user.employeeNumber || '',
+      college: user.college || '',
+      program: user.program || '',
+    },
+    appointment: appointment
+      ? {
+          code: appointment.code || '',
+          time: appointment.time || '',
+          service: appointment.service || '',
+          subcategory: appointment.subcategory || '',
+          status: appointment.status || '',
+        }
+      : null,
+  };
+}
+
 function buildKioskReceiptDocumentHtml(kioskResult) {
   const u = kioskResult.user || {};
   const apt = kioskResult.appointment;
@@ -115,11 +145,61 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
 </html>`;
 }
 
+function getNativePrinterBridge() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return (
+    window.KioskPrinter ||
+    window.AndroidPrinter ||
+    window.Android ||
+    null
+  );
+}
+
+async function tryNativeKioskPrint(kioskResult) {
+  const bridge = getNativePrinterBridge();
+  if (!bridge) {
+    return false;
+  }
+
+  const payload = buildKioskReceiptPayload(kioskResult);
+  const payloadJson = JSON.stringify(payload);
+
+  const candidates = [
+    typeof bridge.printReceipt === 'function'
+      ? () => bridge.printReceipt(payloadJson)
+      : null,
+    typeof bridge.printKioskReceipt === 'function'
+      ? () => bridge.printKioskReceipt(payloadJson)
+      : null,
+    typeof bridge.print === 'function'
+      ? () => bridge.print(payloadJson)
+      : null,
+  ].filter(Boolean);
+
+  for (const invoke of candidates) {
+    try {
+      const result = invoke();
+      const resolved = result && typeof result.then === 'function' ? await result : result;
+      if (resolved === false || resolved === 'false') {
+        continue;
+      }
+      return true;
+    } catch {
+      // Try the next bridge method before falling back to browser printing.
+    }
+  }
+
+  return false;
+}
+
 /**
  * Opens the system print dialog with a minimal HTML receipt (works reliably on Chrome / Android;
  * avoids blank pages from visibility-based @media print on the main app).
  */
-export function printKioskReceipt(kioskResult) {
+function printKioskReceiptWithBrowser(kioskResult) {
   if (!kioskResult) return;
 
   const html = buildKioskReceiptDocumentHtml(kioskResult);
@@ -161,4 +241,16 @@ export function printKioskReceipt(kioskResult) {
 
   iframe.onload = runPrint;
   window.setTimeout(runPrint, 400);
+}
+
+export async function printKioskReceipt(kioskResult) {
+  if (!kioskResult) return false;
+
+  const usedNativeBridge = await tryNativeKioskPrint(kioskResult);
+  if (usedNativeBridge) {
+    return true;
+  }
+
+  printKioskReceiptWithBrowser(kioskResult);
+  return false;
 }

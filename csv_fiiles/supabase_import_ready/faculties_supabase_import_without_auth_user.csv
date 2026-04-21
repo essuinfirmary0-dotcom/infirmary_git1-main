@@ -1,0 +1,4 @@
+"id","faculty_id","email","first_name","last_name","middle_name","department","college","position","photo_url","contact_number","baccalaureate_degree","masters_degree","doctorate_degree","tor_diploma_url","professional_license","license_url","academic_rank","designation","must_change_password"
+"538ad301-658f-4d29-acaf-83c2a6f8f9df","9ba6255c-175e-40c7-9226-9c47ae1bf6bc","pattijamer@gmail.com","Regina Patricia","Bulan","","","","Faculty","","","","","","","","","","","true"
+"e85fd20d-38cf-48d6-bf38-a50647040fc8","67dc24b9-b936-4e49-9b0e-691b0e7f1906","ma.natalia.ciasico@essu.edu.ph","Ma. Natalia","Ciasico","","","","Faculty","","","","","","","","","","","true"
+"f9233c7c-d546-4954-8f48-c3ba4ac6eb18","FAC-20251010-5015","moscarejesus16@gmail.com","Jesus","Moscare","","Civil Engineering","","Faculty","","","","","","","","","","","true"
