@@ -20,7 +20,6 @@ import toast from 'react-hot-toast';
 import { medicalRecordService } from '../../services/medicalRecordService';
 import { appointmentService } from '../../services/appointmentService';
 import { baseURL } from '../../services/api';
-import { openMedicalCertificateWindow } from '../../utils/medicalCertificatePrint';
 
 const toastStyle = {
   borderRadius: '12px',
@@ -92,21 +91,6 @@ function getAttachmentUrl(attachment) {
   if (attachment?.attachmentUrl) return attachment.attachmentUrl;
   if (!attachment?.attachmentPath) return '';
   return `${baseURL}/uploads/${attachment.attachmentPath}`;
-}
-
-function isCertificateRecord(record) {
-  const combined = `${record?.title || ''} ${record?.recordType || ''}`.toLowerCase();
-  return combined.includes('certificate') || combined.includes('certification');
-}
-
-function getStoredAdminName() {
-  try {
-    const raw = localStorage.getItem('authUser');
-    const user = raw ? JSON.parse(raw) : null;
-    return [user?.firstName, user?.middleName, user?.lastName].filter(Boolean).join(' ') || user?.name || 'Infirmary Admin';
-  } catch {
-    return 'Infirmary Admin';
-  }
 }
 
 export const AdminRecordsPage = () => {
@@ -399,12 +383,6 @@ export const AdminRecordsPage = () => {
       toast.success('Medical record saved successfully!', { style: toastStyle });
       const data = await medicalRecordService.getRecordsByUserId(selectedRecordUser.id);
       setApiRecords(Array.isArray(data) ? data : []);
-      if (wantsCertificateIssuance) {
-        const didOpen = openCertificateForRecord({ record: savedRecord, findingsOverride: recordNotes.trim() });
-        if (!didOpen) {
-          toast.error('Certificate saved, but the browser blocked the print/download window.', { style: toastStyle });
-        }
-      }
     } catch (err) {
       const message =
         err?.response?.data?.message || 'Failed to save medical record.';
@@ -431,28 +409,6 @@ export const AdminRecordsPage = () => {
     setBpDiastolic('');
     setRecordDefaultNotes('');
     setHardcopyVerified(false);
-  };
-
-  const openCertificateForRecord = ({ record, findingsOverride = '' } = {}) => {
-    const activeDraft = buildQueueDraft(queueContext);
-    const findingsSource = findingsOverride || record?.notes || '';
-    const cleanedFindings = String(findingsSource || '')
-      .replace(recordDefaultNotes || '', '')
-      .replace(/^Remarks \/ Findings:\s*/i, '')
-      .trim();
-
-    return openMedicalCertificateWindow({
-      patientName: selectedRecordUser?.name || queueContext?.appointment?.patientName || 'Patient',
-      patientId: selectedRecordUser?.studentNumber || selectedRecordUser?.employeeNumber || '',
-      purpose: record?.purpose || activeDraft.purpose || queueContext?.appointment?.purpose || 'Medical certification',
-      service: record?.recordType || activeDraft.recordType || 'Medical',
-      appointmentDate: formatRecordDate(queueContext?.appointment?.date || record?.recordedAt),
-      appointmentTime: queueContext?.appointment?.time || '',
-      findings: cleanedFindings || 'No additional findings were provided.',
-      issuedAt: formatRecordDate(record?.recordedAt || new Date().toISOString()),
-      issuedBy: getStoredAdminName(),
-      certificateCode: record?.id || queueContext?.appointment?.code || '',
-    });
   };
 
   return (
@@ -674,16 +630,6 @@ export const AdminRecordsPage = () => {
                     {selectedRecordTile.title}
                   </h3>
                   <div className="flex items-center gap-2">
-                    {isCertificateRecord(selectedRecordTile) && (
-                      <button
-                        type="button"
-                        onClick={() => openCertificateForRecord({ record: selectedRecordTile })}
-                        className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-primary-hover"
-                      >
-                        <Download size={14} />
-                        Print Certificate
-                      </button>
-                    )}
                     <button
                       onClick={goBackToTiles}
                       className="text-xs font-black text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest"

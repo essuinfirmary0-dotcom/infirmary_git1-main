@@ -36,31 +36,6 @@ function buildMedicalCertificateHtml(certificate) {
       print-color-adjust: exact;
     }
     body { padding: 24px; }
-    .actions {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      margin-bottom: 20px;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .actions button {
-      border: 0;
-      border-radius: 999px;
-      padding: 12px 18px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      background: #0f766e;
-      color: #fff;
-    }
-    .actions button.secondary { background: #334155; }
-    .hint {
-      text-align: center;
-      font-size: 12px;
-      color: #475569;
-      margin-bottom: 18px;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
     .sheet {
       max-width: 820px;
       margin: 0 auto;
@@ -160,7 +135,6 @@ function buildMedicalCertificateHtml(certificate) {
     }
     @media print {
       body { background: #fff; padding: 0; }
-      .actions, .hint { display: none !important; }
       .sheet {
         box-shadow: none;
         border: 0;
@@ -171,12 +145,6 @@ function buildMedicalCertificateHtml(certificate) {
   </style>
 </head>
 <body>
-  <div class="actions">
-    <button onclick="window.print()">Print Certificate</button>
-    <button class="secondary" onclick="window.print()">Download / Save PDF</button>
-    <button class="secondary" onclick="window.close()">Close</button>
-  </div>
-  <div class="hint">Use "Download / Save PDF" in your browser print dialog if you want a digital copy.</div>
   <div class="sheet">
     <div class="topline">University Infirmary</div>
     <h1 class="title">Medical Certificate</h1>
