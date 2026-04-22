@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, isSameDay, parseISO, addDays, isSameWeek, isSameMonth, compareAsc, compareDesc } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List } from 'lucide-react';
+import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List, Building2, GraduationCap } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
@@ -86,6 +86,9 @@ const getScopeLabel = (scope, specificDate) => {
 
 const AppointmentDetailModal = ({ appointment, onClose }) => {
   if (!appointment) return null;
+  const isGuestAppointment = String(appointment.userType || '').trim().toLowerCase() === 'guest';
+  const showCollege = !isGuestAppointment && Boolean(appointment.college?.trim());
+  const showProgram = !isGuestAppointment && Boolean(appointment.program?.trim());
 
   return (
     <AnimatePresence>
@@ -125,6 +128,30 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                 </div>
               </div>
             </div>
+
+            {(showCollege || showProgram) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {showCollege && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <Building2 size={12} />
+                      College
+                    </p>
+                    <p className="text-sm font-black text-slate-800">{appointment.college}</p>
+                  </div>
+                )}
+
+                {showProgram && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <GraduationCap size={12} />
+                      Department / Program
+                    </p>
+                    <p className="text-sm font-black text-slate-800">{appointment.program}</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="bg-white rounded-2xl p-4 border border-slate-100">

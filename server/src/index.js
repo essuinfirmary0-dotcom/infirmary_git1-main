@@ -446,6 +446,12 @@ function mapAppointmentRow(row) {
     slotDefinitionId: row.slot_definition_id || null,
     cancelledAt: row.cancelled_at || null,
     cancellationReason: row.cancellation_reason || '',
+    college: row.appointment_college || '',
+    program: row.appointment_program || '',
+    userType: getEffectiveUserType({
+      user_type: row.appointment_user_type,
+      role: row.appointment_user_role,
+    }) || null,
   };
 }
 
@@ -3349,9 +3355,16 @@ app.get('/api/appointments', loadAuthenticatedUser, async (req, res) => {
     await markMissedAppointmentsAsNotCompleted();
     const { rows } = await pool.query(
       `
-        SELECT *
-        FROM public.appointments
-        WHERE user_id = $1
+        SELECT
+          a.*,
+          u.college AS appointment_college,
+          u.program AS appointment_program,
+          u.user_type AS appointment_user_type,
+          u.role AS appointment_user_role
+        FROM public.appointments AS a
+        LEFT JOIN public.users_auth AS u
+          ON u.id = a.user_id
+        WHERE a.user_id = $1
         ORDER BY appointment_date DESC, created_at DESC
       `,
       [req.authUser.id],
@@ -3372,9 +3385,16 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
     await markMissedAppointmentsAsNotCompleted();
     const { rows } = await pool.query(
       `
-        SELECT *
-        FROM public.appointments
-        ORDER BY appointment_date DESC, created_at DESC
+        SELECT
+          a.*,
+          u.college AS appointment_college,
+          u.program AS appointment_program,
+          u.user_type AS appointment_user_type,
+          u.role AS appointment_user_role
+        FROM public.appointments AS a
+        LEFT JOIN public.users_auth AS u
+          ON u.id = a.user_id
+        ORDER BY a.appointment_date DESC, a.created_at DESC
       `,
     );
 
