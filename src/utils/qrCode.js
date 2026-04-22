@@ -1,3 +1,5 @@
+import { resolveDisplayIdentifier } from './userIdentity';
+
 function normalizeQrSource(value) {
   const trimmed = String(value || '').trim();
   return trimmed || null;
@@ -6,6 +8,7 @@ function normalizeQrSource(value) {
 export function resolveQrValue(user = {}) {
   return (
     normalizeQrSource(user.qrData) ||
+    normalizeQrSource(resolveDisplayIdentifier(user)) ||
     normalizeQrSource(user.idNumber) ||
     normalizeQrSource(user.studentNumber) ||
     normalizeQrSource(user.employeeNumber) ||
@@ -32,10 +35,15 @@ export function buildGeneratedQrUrl(qrValue) {
 }
 
 export function resolveUserQrCode(user = {}) {
+  const generatedQrCode = buildGeneratedQrUrl(resolveQrValue(user));
+  if (generatedQrCode) {
+    return generatedQrCode;
+  }
+
   const existingQrCode = normalizeQrSource(user.qrCode);
   if (existingQrCode && isRenderableQrImage(existingQrCode)) {
     return existingQrCode;
   }
 
-  return buildGeneratedQrUrl(resolveQrValue(user));
+  return null;
 }

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { profileService } from '../services/profileService';
 import { getProfileImageSrc, handleProfileImageError } from '../utils/profileImage';
+import { getRoleIdentityInfo } from '../utils/userIdentity';
 
 const getUserTypeLabel = (userType) => {
   const map = {
@@ -130,7 +131,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   };
 
   const userTypeLabel = getUserTypeLabel(user?.userType);
-  const isGuestUser = user?.userType === 'guest';
+  const identityInfo = getRoleIdentityInfo(user);
+  const isGuestUser = identityInfo.isGuestUser;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 min-w-0">
@@ -153,9 +155,14 @@ export const ProfileView = ({ user, onUserUpdated }) => {
               <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-bold border border-emerald-100 flex items-center gap-1">
                 <ShieldCheck size={12} /> {userTypeLabel}
               </span>
-              {user?.studentNumber && (
+              {!isGuestUser && identityInfo.identifierValue && (
                 <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold border border-slate-200">
-                  Student ID: {user.studentNumber}
+                  {identityInfo.identifierLabel}: {identityInfo.identifierValue}
+                </span>
+              )}
+              {identityInfo.isEmployeeUser && identityInfo.position && (
+                <span className="px-3 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-bold border border-amber-100">
+                  {identityInfo.position}
                 </span>
               )}
             </div>
@@ -380,26 +387,30 @@ export const ProfileView = ({ user, onUserUpdated }) => {
           </div>
 
           <div className="space-y-2 text-xs sm:text-sm">
-            {user?.studentNumber && (
+            {!isGuestUser && identityInfo.identifierValue && (
               <p>
-                <span className="font-semibold text-slate-500">Student No.</span>{' '}
-                <span className="font-black text-slate-900">{user.studentNumber}</span>
+                <span className="font-semibold text-slate-500">{identityInfo.identifierLabel}</span>{' '}
+                <span className="font-black text-slate-900">{identityInfo.identifierValue}</span>
               </p>
             )}
-            {user?.employeeNumber && (
-              <p>
-                <span className="font-semibold text-slate-500">Employee No.</span>{' '}
-                <span className="font-black text-slate-900">{user.employeeNumber}</span>
-              </p>
-            )}
-            {!isGuestUser && user?.college && (
+            {identityInfo.isStudentUser && identityInfo.college && (
               <p className="text-slate-600">
-                <span className="font-semibold">College:</span> {user.college}
+                <span className="font-semibold">College:</span> {identityInfo.college}
               </p>
             )}
-            {!isGuestUser && user?.program && (
+            {identityInfo.isStudentUser && identityInfo.program && (
               <p className="text-slate-600">
-                <span className="font-semibold">Program:</span> {user.program}
+                <span className="font-semibold">Program:</span> {identityInfo.program}
+              </p>
+            )}
+            {identityInfo.isEmployeeUser && identityInfo.position && (
+              <p className="text-slate-600">
+                <span className="font-semibold">Position:</span> {identityInfo.position}
+              </p>
+            )}
+            {identityInfo.isEmployeeUser && identityInfo.department && (
+              <p className="text-slate-600">
+                <span className="font-semibold">Program / Department:</span> {identityInfo.department}
               </p>
             )}
             {isGuestUser && user?.program && (

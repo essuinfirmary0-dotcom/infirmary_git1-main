@@ -4,6 +4,8 @@ import { motion } from 'motion/react';
 import toast from 'react-hot-toast';
 import { UserPlus, GraduationCap, Building2, Briefcase, ChevronLeft, Eye, EyeOff, Lock } from 'lucide-react';
 import { authService } from '../services/authService';
+import { resolveUserQrCode } from '../utils/qrCode';
+import { getRoleIdentityInfo } from '../utils/userIdentity';
 
 const userTypes = [
   { id: 'new', label: 'New Student', icon: GraduationCap, color: 'bg-blue-500' },
@@ -59,6 +61,8 @@ export const SignupPage = () => {
   });
   const [loading, setLoading] = useState(false);
   const [createdUser, setCreatedUser] = useState(null);
+  const createdUserIdentity = getRoleIdentityInfo(createdUser || {});
+  const createdUserQrCode = resolveUserQrCode(createdUser || {});
 
   const handleDownloadQr = (qrCode) => {
     if (!qrCode) return;
@@ -363,32 +367,36 @@ export const SignupPage = () => {
                 </div>
 
                 <div className="mt-3 space-y-1.5 text-xs">
-                  {createdUser.studentNumber && (
+                  {createdUserIdentity.identifierValue && (
                     <p>
-                      <span className="font-bold text-slate-400">Student No.</span>{' '}
+                      <span className="font-bold text-slate-400">{createdUserIdentity.identifierLabel}</span>{' '}
                       <span className="font-black bg-slate-800 px-2 py-0.5 rounded-lg">
-                        {createdUser.studentNumber}
+                        {createdUserIdentity.identifierValue}
                       </span>
                     </p>
                   )}
-                  {createdUser.employeeNumber && (
+                  {createdUserIdentity.isEmployeeUser && createdUserIdentity.position && (
                     <p>
-                      <span className="font-bold text-slate-400">Employee No.</span>{' '}
-                      <span className="font-black bg-slate-800 px-2 py-0.5 rounded-lg">
-                        {createdUser.employeeNumber}
-                      </span>
+                      <span className="font-bold text-slate-400">Position</span>{' '}
+                      <span className="font-semibold">{createdUserIdentity.position}</span>
                     </p>
                   )}
-                  {createdUser.college && (
+                  {createdUserIdentity.isStudentUser && createdUserIdentity.college && (
                     <p>
                       <span className="font-bold text-slate-400">College</span>{' '}
-                      <span className="font-semibold">{createdUser.college}</span>
+                      <span className="font-semibold">{createdUserIdentity.college}</span>
                     </p>
                   )}
-                  {createdUser.program && (
+                  {createdUserIdentity.isStudentUser && createdUserIdentity.program && (
                     <p>
                       <span className="font-bold text-slate-400">Program</span>{' '}
-                      <span className="font-semibold">{createdUser.program}</span>
+                      <span className="font-semibold">{createdUserIdentity.program}</span>
+                    </p>
+                  )}
+                  {createdUserIdentity.isEmployeeUser && createdUserIdentity.department && (
+                    <p>
+                      <span className="font-bold text-slate-400">Program / Department</span>{' '}
+                      <span className="font-semibold">{createdUserIdentity.department}</span>
                     </p>
                   )}
                 </div>
@@ -398,12 +406,12 @@ export const SignupPage = () => {
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
                   QR Code
                 </p>
-                {createdUser.qrCode ? (
+                {createdUserQrCode ? (
                   <>
                     <div className="p-2 bg-white rounded-2xl border border-slate-200 shadow-inner">
                       <img
-                        src={createdUser.qrCode}
-                        alt="Student/Employee QR code"
+                        src={createdUserQrCode}
+                        alt="Profile QR code"
                         className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl object-contain"
                       />
                     </div>
@@ -413,7 +421,7 @@ export const SignupPage = () => {
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleDownloadQr(createdUser.qrCode)}
+                      onClick={() => handleDownloadQr(createdUserQrCode)}
                       className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-[11px] font-bold hover:bg-primary-hover shadow-sm"
                     >
                       Download QR

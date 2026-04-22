@@ -214,6 +214,151 @@ function isGuestUserType(userType) {
   return String(userType || '').trim().toLowerCase() === 'guest';
 }
 
+const STUDENT_USER_TYPES = new Set(['student', 'new', 'old']);
+const NON_EMPLOYEE_USER_TYPES = new Set(['guest', 'admin', 'super_admin']);
+
+function normalizeUserType(userType) {
+  return String(userType || '').trim().toLowerCase();
+}
+
+function isInternalGeneratedIdentifier(value) {
+  return /^(?:NS|EM)-\d+$/i.test(normalizeIdentifier(value));
+}
+
+function pickActualIdentifier(...values) {
+  const candidates = values.map((value) => normalizeIdentifier(value)).filter(Boolean);
+  return candidates.find((value) => !isInternalGeneratedIdentifier(value)) || null;
+}
+
+function isEmployeeLikeUser(user) {
+  const normalizedUserType = normalizeUserType(getEffectiveUserType(user));
+
+  if (!normalizedUserType) {
+    return false;
+  }
+
+  if (STUDENT_USER_TYPES.has(normalizedUserType) || NON_EMPLOYEE_USER_TYPES.has(normalizedUserType)) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveActualUserIdentifier(user) {
+  const idNumber = normalizeIdentifier(user?.id_number);
+  const studentNumber = normalizeIdentifier(user?.student_number);
+  const employeeNumber = normalizeIdentifier(user?.employee_number);
+
+  if (isEmployeeLikeUser(user)) {
+    return pickActualIdentifier(idNumber, employeeNumber, studentNumber) || idNumber || null;
+  }
+
+  return pickActualIdentifier(idNumber, studentNumber, employeeNumber) || idNumber || null;
+}
+
+function resolveEmployeePosition(user) {
+  return normalizeIdentifier(user?.faculty_designation)
+    || normalizeIdentifier(user?.faculty_position)
+    || normalizeIdentifier(user?.faculty_academic_rank)
+    || normalizeIdentifier(user?.role)
+    || '';
+}
+
+function resolveEmployeeDepartment(user) {
+  return normalizeIdentifier(user?.faculty_department)
+    || normalizeIdentifier(user?.program)
+    || normalizeIdentifier(user?.faculty_college)
+    || normalizeIdentifier(user?.college)
+    || '';
+}
+
+const AUTH_USER_SELECT = `
+  SELECT
+    u.id,
+    u.firstname,
+    u.middle_initial,
+    u.lastname,
+    u.email,
+    u.user_type,
+    u.picture_url,
+    u.student_number,
+    u.employee_number,
+    u.college,
+    u.program,
+    u.qr_code,
+    u.qr_data,
+    u.phone,
+    u.address,
+    u.id_number,
+    u.role,
+    u.status,
+    u.password_hash,
+    f.department AS faculty_department,
+    f.college AS faculty_college,
+    f.position AS faculty_position,
+    f.designation AS faculty_designation,
+    f.academic_rank AS faculty_academic_rank
+  FROM public.users_auth AS u
+  LEFT JOIN LATERAL (
+    SELECT
+      department,
+      college,
+      position,
+      designation,
+      academic_rank,
+      updated_at,
+      created_at
+    FROM public.faculties
+    WHERE auth_user_id = u.id
+    ORDER BY
+      CASE
+        WHEN COALESCE(NULLIF(designation, ''), NULLIF(position, ''), NULLIF(academic_rank, ''), NULLIF(department, ''), NULLIF(college, '')) IS NULL THEN 1
+        ELSE 0
+      END,
+      updated_at DESC NULLS LAST,
+      created_at DESC NULLS LAST
+    LIMIT 1
+  ) AS f ON TRUE
+`;
+
+async function fetchAuthUserById(userId) {
+  const { rows } = await pool.query(
+    `
+      ${AUTH_USER_SELECT}
+      WHERE u.id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return rows[0] || null;
+}
+
+async function findAuthUserByLoginIdentifier(identifier) {
+  const normalizedLookup = normalizeIdentifier(identifier).toUpperCase();
+
+  if (!normalizedLookup) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+      ${AUTH_USER_SELECT}
+      WHERE UPPER(COALESCE(u.id_number, '')) = $1
+         OR UPPER(COALESCE(u.student_number, '')) = $1
+         OR UPPER(COALESCE(u.employee_number, '')) = $1
+      ORDER BY
+        CASE WHEN LOWER(COALESCE(u.status, '')) = 'active' THEN 0 ELSE 1 END,
+        u.created_at DESC,
+        u.updated_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [normalizedLookup],
+  );
+
+  return rows[0] || null;
+}
+
 function getUserDisplayName(user) {
   return [user?.firstname, user?.lastname].filter(Boolean).join(' ') || user?.email || user?.id_number || 'Unknown User';
 }
@@ -304,45 +449,18 @@ async function loadAuthenticatedUser(req, res, next) {
   }
 
   try {
-    const { rows } = await pool.query(
-      `
-        SELECT
-          id,
-          firstname,
-          middle_initial,
-          lastname,
-          email,
-          user_type,
-          picture_url,
-          student_number,
-          employee_number,
-          college,
-          program,
-          qr_code,
-          qr_data,
-          phone,
-          address,
-          id_number,
-          role,
-          status,
-          password_hash
-        FROM public.users_auth
-        WHERE id = $1
-        LIMIT 1
-      `,
-      [payload.sub],
-    );
+    const user = await fetchAuthUserById(payload.sub);
 
-    if (!rows[0]) {
+    if (!user) {
       return res.status(401).json({ message: 'Session user was not found.' });
     }
 
-    if (String(rows[0].status || '').toLowerCase() === 'blocked') {
+    if (String(user.status || '').toLowerCase() === 'blocked') {
       return res.status(403).json({ message: 'This account is blocked. Please contact the super admin.' });
     }
 
     req.authTokenPayload = payload;
-    req.authUser = rows[0];
+    req.authUser = user;
     return next();
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load authenticated user.', error: error.message });
@@ -350,20 +468,32 @@ async function loadAuthenticatedUser(req, res, next) {
 }
 
 function buildUserPayload(user) {
+  const userType = getEffectiveUserType(user) || 'student';
+  const studentUser = STUDENT_USER_TYPES.has(normalizeUserType(userType));
+  const employeeUser = isEmployeeLikeUser({ ...user, user_type: userType });
+  const guestUser = isGuestUserType(userType);
+  const actualIdentifier = resolveActualUserIdentifier({ ...user, user_type: userType });
+
   return {
     id: user.id,
     firstName: user.firstname || '',
     middleName: user.middle_initial || '',
     lastName: user.lastname || '',
     email: user.email || '',
-    userType: user.user_type || user.role || 'student',
+    userType,
     pictureUrl: user.picture_url || null,
-    studentNumber: user.student_number || user.id_number || null,
-    employeeNumber: user.employee_number || null,
-    college: user.college || '',
-    program: user.program || '',
+    studentNumber: studentUser ? actualIdentifier : null,
+    employeeNumber: employeeUser ? actualIdentifier : null,
+    college: studentUser
+      ? normalizeIdentifier(user.college) || normalizeIdentifier(user.faculty_college) || ''
+      : normalizeIdentifier(user.faculty_college) || normalizeIdentifier(user.college) || '',
+    program: studentUser
+      ? normalizeIdentifier(user.program) || ''
+      : normalizeIdentifier(user.program) || normalizeIdentifier(user.faculty_department) || '',
+    department: employeeUser ? resolveEmployeeDepartment(user) : '',
+    position: employeeUser ? resolveEmployeePosition(user) : '',
     qrCode: user.qr_code || null,
-    qrData: user.qr_data || null,
+    qrData: guestUser ? normalizeIdentifier(user.qr_data) || actualIdentifier : actualIdentifier || normalizeIdentifier(user.qr_data) || null,
     phone: user.phone || '',
     address: user.address || '',
     idNumber: user.id_number || null,
@@ -395,7 +525,7 @@ async function generateGuestIdentifier() {
 }
 
 function resolveKioskReceiptIdentity(user) {
-  const normalizedUserType = String(getEffectiveUserType(user) || '').trim().toLowerCase();
+  const normalizedUserType = normalizeUserType(getEffectiveUserType(user));
   const studentNumber = normalizeIdentifier(user?.student_number);
   const employeeNumber = normalizeIdentifier(user?.employee_number);
   const idNumber = normalizeIdentifier(user?.id_number);
@@ -409,17 +539,17 @@ function resolveKioskReceiptIdentity(user) {
     };
   }
 
-  if (normalizedUserType === 'employee') {
+  if (isEmployeeLikeUser(user)) {
     return {
       type: 'employee',
-      label: 'Employee No.',
+      label: 'Employee Number',
       value: employeeNumber || idNumber || null,
     };
   }
 
   return {
     type: 'student',
-    label: 'Student No.',
+    label: 'Student ID Number',
     value: idNumber || studentNumber || null,
   };
 }
@@ -1867,7 +1997,6 @@ async function getInitialAppointmentStatus() {
 
 app.post('/api/auth/login', async (req, res) => {
   const studentId = normalizeIdentifier(req.body?.studentId);
-  const normalizedLookup = studentId.toUpperCase();
   const password = normalizeCredential(req.body?.password);
 
   if (!studentId || !password) {
@@ -1877,42 +2006,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    const { rows } = await pool.query(
-      `
-        SELECT
-          id,
-          firstname,
-          middle_initial,
-          lastname,
-          email,
-          user_type,
-          picture_url,
-          student_number,
-          employee_number,
-          college,
-          program,
-          qr_code,
-          qr_data,
-          phone,
-          address,
-          id_number,
-          role,
-          status,
-          password_hash
-        FROM public.users_auth
-        WHERE UPPER(COALESCE(id_number, '')) = $1
-           OR UPPER(COALESCE(student_number, '')) = $1
-           OR UPPER(COALESCE(employee_number, '')) = $1
-        ORDER BY
-          CASE WHEN LOWER(COALESCE(status, '')) = 'active' THEN 0 ELSE 1 END,
-          created_at DESC,
-          updated_at DESC NULLS LAST
-        LIMIT 1
-      `,
-      [normalizedLookup],
-    );
-
-    const user = rows[0];
+    const user = await findAuthUserByLoginIdentifier(studentId);
 
     if (!user) {
       return res.status(401).json({
@@ -2019,7 +2113,7 @@ app.post('/api/auth/guest', async (_req, res) => {
       [guestIdentifier],
     );
 
-    const guestUser = rows[0];
+    const guestUser = (await fetchAuthUserById(rows[0].id)) || rows[0];
     const token = createSessionToken(guestUser, guestIdentifier);
 
     return res.status(201).json({
@@ -2116,7 +2210,7 @@ app.post('/api/admin/users', loadAuthenticatedUser, async (req, res) => {
       ],
     );
 
-    const createdUser = rows[0];
+    const createdUser = (await fetchAuthUserById(rows[0].id)) || rows[0];
     const adminName = [req.authUser.firstname, req.authUser.lastname].filter(Boolean).join(' ') || req.authUser.email || 'Super Admin';
 
     await createAdminActivityLog({
@@ -2136,7 +2230,7 @@ app.post('/api/admin/users', loadAuthenticatedUser, async (req, res) => {
     return res.status(201).json({
       message: 'Admin account created successfully.',
       user: buildUserPayload(createdUser),
-      loginId: createdUser.id_number,
+      loginId: createdUser?.id_number || rows[0].id_number,
     });
   } catch (error) {
     const isEmailConflict = error.code === '23505' && String(error.constraint || '').includes('email');
@@ -2767,7 +2861,7 @@ app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
 
     return res.json({
       message: 'Profile updated successfully.',
-      user: buildUserPayload(rows[0]),
+      user: buildUserPayload((await fetchAuthUserById(rows[0].id)) || rows[0]),
     });
   } catch (error) {
     const isEmailConflict = error.code === '23505' && String(error.constraint || '').includes('email');
