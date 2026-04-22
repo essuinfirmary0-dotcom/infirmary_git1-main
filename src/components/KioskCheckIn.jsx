@@ -7,13 +7,16 @@ import {
   formatIdInput,
   getKioskQrInputDisplayValue,
 } from '../hooks/useKioskCheckIn';
+import { resolveKioskReceiptIdentity } from '../utils/kioskReceiptIdentity';
 import { printKioskReceipt } from '../utils/kioskPrintReceipt';
 
 function KioskResultBlock({ kioskResult, tone = 'light' }) {
   if (!kioskResult) return null;
   const isDark = tone === 'dark';
-  const isGuestUser = kioskResult.user?.userType === 'guest';
-  const guestType = kioskResult.user?.program?.trim() || '';
+  const user = kioskResult.user || {};
+  const receiptIdentity = resolveKioskReceiptIdentity(user);
+  const isGuestUser = receiptIdentity.type === 'guest';
+  const guestType = user.program?.trim() || '';
   return (
     <div
       className={`mt-3 border-t pt-3 space-y-2 ${
@@ -46,18 +49,17 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
       <div
         className={`text-xs space-y-1.5 ${isDark ? 'text-white/85' : 'text-slate-600'}`}
       >
-        <p className="font-semibold">{kioskResult.user?.name || 'Guest'}</p>
-        {kioskResult.user?.studentNumber && (
-          <p>Student No.: {kioskResult.user.studentNumber}</p>
+        <p className="font-semibold">{user.name || 'Guest'}</p>
+        {receiptIdentity.value && (
+          <p>
+            {receiptIdentity.label}: {receiptIdentity.value}
+          </p>
         )}
-        {kioskResult.user?.employeeNumber && (
-          <p>Employee No.: {kioskResult.user.employeeNumber}</p>
+        {!isGuestUser && user.college?.trim() && (
+          <p>College: {user.college}</p>
         )}
-        {!isGuestUser && kioskResult.user?.college?.trim() && (
-          <p>College: {kioskResult.user.college}</p>
-        )}
-        {!isGuestUser && kioskResult.user?.program?.trim() && (
-          <p>Program: {kioskResult.user.program}</p>
+        {!isGuestUser && user.program?.trim() && (
+          <p>Program: {user.program}</p>
         )}
         {isGuestUser && guestType && (
           <p>Type of Guest: {guestType}</p>
@@ -154,10 +156,12 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
   if (!kioskResult) return null;
 
   const pct = (secondsLeft / RECEIPT_AUTO_CLOSE_SECONDS) * 100;
-  const isGuestUser = kioskResult.user?.userType === 'guest';
-  const guestType = kioskResult.user?.program?.trim() || '';
-  const showCollege = !isGuestUser && Boolean(kioskResult.user?.college?.trim());
-  const showProgram = !isGuestUser && Boolean(kioskResult.user?.program?.trim());
+  const user = kioskResult.user || {};
+  const receiptIdentity = resolveKioskReceiptIdentity(user);
+  const isGuestUser = receiptIdentity.type === 'guest';
+  const guestType = user.program?.trim() || '';
+  const showCollege = !isGuestUser && Boolean(user.college?.trim());
+  const showProgram = !isGuestUser && Boolean(user.program?.trim());
   const showGuestType = isGuestUser && Boolean(guestType);
 
   const handlePrint = () => {
@@ -205,17 +209,17 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
           <div className="bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs p-5 text-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="font-semibold text-slate-700">
-              {kioskResult.user?.name || 'Guest'}
+              {user.name || 'Guest'}
             </p>
-            {kioskResult.user?.studentNumber && (
-              <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-bold">
-                {kioskResult.user.studentNumber}
-              </span>
-            )}
-            {kioskResult.user?.employeeNumber && !kioskResult.user?.studentNumber && (
-              <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-bold">
-                {kioskResult.user.employeeNumber}
-              </span>
+            {receiptIdentity.value && (
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  {receiptIdentity.label}
+                </p>
+                <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-bold">
+                  {receiptIdentity.value}
+                </span>
+              </div>
             )}
           </div>
           {(showCollege || showProgram || showGuestType) && (
@@ -227,7 +231,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                       College
                     </p>
-                    <p className="font-semibold text-slate-800 leading-snug">{kioskResult.user.college}</p>
+                    <p className="font-semibold text-slate-800 leading-snug">{user.college}</p>
                   </div>
                 </div>
               )}
@@ -238,7 +242,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                       Program
                     </p>
-                    <p className="font-semibold text-slate-800 leading-snug">{kioskResult.user.program}</p>
+                    <p className="font-semibold text-slate-800 leading-snug">{user.program}</p>
                   </div>
                 </div>
               )}

@@ -1,3 +1,5 @@
+import { resolveKioskReceiptIdentity } from './kioskReceiptIdentity';
+
 /** Escape text for HTML body (API-sourced fields). */
 function escapeHtml(s) {
   if (s == null || s === '') return '';
@@ -13,6 +15,8 @@ export function buildKioskReceiptPayload(kioskResult) {
 
   const user = kioskResult.user || {};
   const appointment = kioskResult.appointment || null;
+  const receiptIdentity = resolveKioskReceiptIdentity(user);
+  const isGuestUser = receiptIdentity.type === 'guest';
 
   return {
     queueNumber: kioskResult.queueNumber || '',
@@ -20,10 +24,14 @@ export function buildKioskReceiptPayload(kioskResult) {
     hasAppointmentToday: Boolean(kioskResult.hasAppointmentToday && appointment),
     user: {
       name: user.name || 'Guest',
-      userType: user.userType || '',
-      studentNumber: user.studentNumber || '',
-      employeeNumber: user.employeeNumber || '',
-      college: user.college || '',
+      userType: user.userType || receiptIdentity.type || '',
+      studentNumber: receiptIdentity.type === 'student' ? receiptIdentity.value : '',
+      employeeNumber: receiptIdentity.type === 'employee' ? receiptIdentity.value : '',
+      guestId: receiptIdentity.type === 'guest' ? receiptIdentity.value : '',
+      receiptIdType: receiptIdentity.type || '',
+      receiptIdLabel: receiptIdentity.label || '',
+      receiptIdValue: receiptIdentity.value || '',
+      college: isGuestUser ? '' : user.college || '',
       program: user.program || '',
     },
     appointment: appointment
@@ -41,12 +49,19 @@ export function buildKioskReceiptPayload(kioskResult) {
 function buildKioskReceiptDocumentHtml(kioskResult) {
   const u = kioskResult.user || {};
   const apt = kioskResult.appointment;
-  const isGuestUser = String(u.userType || '').trim().toLowerCase() === 'guest';
+  const receiptIdentity = resolveKioskReceiptIdentity(u);
+  const isGuestUser =
+    receiptIdentity.type === 'guest' ||
+    String(u.userType || '').trim().toLowerCase() === 'guest';
   const name = escapeHtml(u.name || 'Guest');
   const queue = escapeHtml(kioskResult.queueNumber ?? '');
   const dateLine = escapeHtml(kioskResult.checkInDateDisplay || '');
-  const student = u.studentNumber ? escapeHtml(u.studentNumber) : '';
-  const employee = u.employeeNumber ? escapeHtml(u.employeeNumber) : '';
+  const receiptIdLabel = receiptIdentity.label
+    ? escapeHtml(receiptIdentity.label)
+    : '';
+  const receiptIdValue = receiptIdentity.value
+    ? escapeHtml(receiptIdentity.value)
+    : '';
   const college = !isGuestUser && u.college?.trim() ? escapeHtml(u.college) : '';
   const program = !isGuestUser && u.program?.trim() ? escapeHtml(u.program) : '';
   const guestType = isGuestUser && u.program?.trim() ? escapeHtml(u.program) : '';
@@ -69,10 +84,9 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
       </div>`;
   }
 
-  const idLine = student
-    ? `<div style="font-size:11px;"><strong>Student No.:</strong> ${student}</div>`
-    : employee
-      ? `<div style="font-size:11px;"><strong>Employee No.:</strong> ${employee}</div>`
+  const idLine =
+    receiptIdLabel && receiptIdValue
+      ? `<div style="font-size:11px;"><strong>${receiptIdLabel}:</strong> ${receiptIdValue}</div>`
       : '';
 
   const collegeLine = college

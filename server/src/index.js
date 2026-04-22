@@ -367,12 +367,49 @@ async function generateGuestIdentifier() {
   return `GST-${Date.now().toString().slice(-6)}`;
 }
 
+function resolveKioskReceiptIdentity(user) {
+  const normalizedUserType = String(getEffectiveUserType(user) || '').trim().toLowerCase();
+  const studentNumber = normalizeIdentifier(user?.student_number);
+  const employeeNumber = normalizeIdentifier(user?.employee_number);
+  const idNumber = normalizeIdentifier(user?.id_number);
+  const guestIdentifier = idNumber || normalizeIdentifier(user?.qr_data);
+
+  if (isGuestUserType(normalizedUserType)) {
+    return {
+      type: 'guest',
+      label: 'Guest ID',
+      value: guestIdentifier || null,
+    };
+  }
+
+  if (normalizedUserType === 'employee') {
+    return {
+      type: 'employee',
+      label: 'Employee No.',
+      value: employeeNumber || idNumber || null,
+    };
+  }
+
+  return {
+    type: 'student',
+    label: 'Student No.',
+    value: studentNumber || idNumber || null,
+  };
+}
+
 function buildKioskUserPayload(user) {
+  const receiptIdentity = resolveKioskReceiptIdentity(user);
+
   return {
     id: user.id,
     name: [user.firstname, user.middle_initial, user.lastname].filter(Boolean).join(' ') || user.email || user.id_number || 'Guest',
-    studentNumber: user.student_number || null,
-    employeeNumber: user.employee_number || null,
+    userType: getEffectiveUserType(user) || receiptIdentity.type || null,
+    studentNumber: receiptIdentity.type === 'student' ? receiptIdentity.value : null,
+    employeeNumber: receiptIdentity.type === 'employee' ? receiptIdentity.value : null,
+    guestId: receiptIdentity.type === 'guest' ? receiptIdentity.value : null,
+    receiptIdType: receiptIdentity.type,
+    receiptIdLabel: receiptIdentity.label,
+    receiptIdValue: receiptIdentity.value,
     college: user.college || '',
     program: user.program || '',
   };
