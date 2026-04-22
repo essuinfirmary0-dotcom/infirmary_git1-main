@@ -393,7 +393,7 @@ function resolveKioskReceiptIdentity(user) {
   return {
     type: 'student',
     label: 'Student No.',
-    value: studentNumber || idNumber || null,
+    value: idNumber || studentNumber || null,
   };
 }
 

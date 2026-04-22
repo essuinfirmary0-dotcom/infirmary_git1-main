@@ -59,7 +59,7 @@ export function resolveKioskReceiptIdentity(user = {}) {
     return {
       type: 'student',
       label: 'Student No.',
-      value: cleanValue(user.studentNumber || user.receiptIdValue),
+      value: cleanValue(user.idNumber || user.studentNumber || user.receiptIdValue),
     };
   }
 
