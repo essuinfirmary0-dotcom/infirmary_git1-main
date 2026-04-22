@@ -27,6 +27,11 @@ const safeFormat = (date, formatStr) => {
   }
 };
 
+const getInitialGuestPatientName = (user) => {
+  const trimmedName = String(user?.name || '').trim();
+  return /^guest$/i.test(trimmedName) ? '' : trimmedName;
+};
+
 const services = [
   { id: 'Dental', label: 'Dental', description: 'Oral health & hygiene' },
   { id: 'Medical', label: 'Medical', description: 'General health' },
@@ -480,7 +485,7 @@ const ConfirmationModal = ({
 };
 
 const initialFormData = (user) => ({
-  patientName: user?.name || '',
+  patientName: user?.userType === 'guest' ? getInitialGuestPatientName(user) : (user?.name || ''),
   guestType: user?.program || '',
   college: user?.college || '',
   program: user?.program || '',
@@ -629,7 +634,9 @@ export const BookingForm = ({
     setDate(parseAppointmentDateValue(rescheduleAppointment.date));
     setFormData((prev) => ({
       ...prev,
-      patientName: isGuestUser ? (prev.patientName || user?.name || '') : (user?.name || rescheduleAppointment.patientName || prev.patientName),
+      patientName: isGuestUser
+        ? (prev.patientName || rescheduleAppointment.patientName || getInitialGuestPatientName(user))
+        : (user?.name || rescheduleAppointment.patientName || prev.patientName),
       guestType: user?.program || prev.guestType,
       college: isStudentBookingUser ? (user?.college || prev.college) : prev.college,
       program: isStudentBookingUser ? (user?.program || prev.program) : prev.program,
