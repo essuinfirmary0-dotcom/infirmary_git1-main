@@ -384,11 +384,9 @@ function mapManagedUserRow(user) {
 }
 
 const DEFAULT_TIME_SLOTS = [
-  { timeSlot: '12:00 AM - 7:00 AM', maxCapacity: 50, sortOrder: 0 },
-  { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 1 },
+  { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 0 },
+  { timeSlot: '11:00 AM - 1:00 PM', maxCapacity: 50, sortOrder: 1 },
   { timeSlot: '1:00 PM - 4:00 PM', maxCapacity: 50, sortOrder: 2 },
-  { timeSlot: '4:00 PM - 7:00 PM', maxCapacity: 50, sortOrder: 3 },
-  { timeSlot: '7:00 PM - 11:00 PM', maxCapacity: 50, sortOrder: 4 },
 ];
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
@@ -3117,7 +3115,10 @@ app.get('/api/appointments/slots', loadAuthenticatedUser, async (req, res) => {
 
     if (timeSlot) {
       const single = slots.find((slot) => slot.timeSlot === timeSlot);
-      return res.json(single || { timeSlot, maxCapacity: 50, remaining: 50 });
+      if (!single) {
+        return res.status(404).json({ message: 'Selected time slot is no longer available.' });
+      }
+      return res.json(single);
     }
 
     return res.json({ slots });
