@@ -62,7 +62,7 @@ export function extractIdFromScanInput(raw) {
   const text = String(raw || '').trim();
   if (!text) return null;
 
-  const directMatch = text.match(/\b(?:NS-\d+|EM-\d+|\d{2}-\d+)\b/i);
+  const directMatch = text.match(/\b(?:NS-\d{5,}|EM-\d{5,}|\d{2,4}-\d{4,6}|\d{7,8})\b/i);
   if (directMatch?.[0]) return directMatch[0].toUpperCase();
 
   const checkInRaw = extractIdFromCheckInQueryParam(text);
@@ -94,6 +94,21 @@ export function extractIdFromScanInput(raw) {
   return null;
 }
 
+export function normalizeQrScanInput(raw, previousRaw = '') {
+  const text = String(raw || '');
+  if (!text) return '';
+
+  const extractedId = extractIdFromScanInput(text);
+  if (extractedId) return extractedId;
+
+  const previousId = extractIdFromScanInput(previousRaw);
+  if (previousId && text.toUpperCase().includes(previousId)) {
+    return previousId;
+  }
+
+  return text;
+}
+
 /** What to show in the QR input: extracted ID, or hide JSON blobs until parseable. */
 export function getKioskQrInputDisplayValue(raw) {
   const text = String(raw || '');
@@ -107,6 +122,26 @@ export function getKioskQrInputDisplayValue(raw) {
 
 let kioskUrlCheckInDedupeAt = 0;
 let kioskUrlCheckInDedupeId = '';
+
+function buildKioskSubmission(mode, rawValue) {
+  const trimmed = String(rawValue || '').trim();
+  if (!trimmed) return null;
+
+  if (mode === 'qr') {
+    const normalizedId = extractIdFromScanInput(trimmed) || trimmed;
+    return {
+      normalizedValue: normalizedId,
+      dedupeKey: normalizedId,
+      payload: { mode: 'qr', payload: normalizedId },
+    };
+  }
+
+  return {
+    normalizedValue: trimmed,
+    dedupeKey: trimmed,
+    payload: { mode: 'id', id: trimmed },
+  };
+}
 
 export function useKioskCheckIn() {
   const navigate = useNavigate();
@@ -123,6 +158,61 @@ export function useKioskCheckIn() {
   const kioskSubmitLockRef = useRef(false);
   const lastProcessedScanRef = useRef('');
   const qrAutoSubmitTimerRef = useRef(null);
+
+  const submitKioskScan = useCallback(
+    async (mode, rawValue) => {
+      const submission = buildKioskSubmission(mode, rawValue);
+      if (!submission) return false;
+      if (kioskLoading || kioskSubmitLockRef.current) return false;
+      if (mode === 'qr' && lastProcessedScanRef.current === submission.dedupeKey) {
+        return false;
+      }
+
+      if (qrAutoSubmitTimerRef.current) {
+        clearTimeout(qrAutoSubmitTimerRef.current);
+      }
+
+      try {
+        kioskSubmitLockRef.current = true;
+        if (mode === 'qr') {
+          lastProcessedScanRef.current = submission.dedupeKey;
+          setScanValue(submission.normalizedValue);
+        }
+        setShowReceipt(false);
+        setKioskLoading(true);
+        setKioskResult(null);
+        setKioskError(null);
+
+        const data = await authService.kioskCheckIn(submission.payload);
+        if (mode === 'qr') {
+          setScanValue('');
+          navigate('/kiosk/appointment', { state: { kioskResult: data } });
+          return true;
+        }
+
+        setKioskResult(data);
+        setShowReceipt(true);
+        return true;
+      } catch (err) {
+        const resp = err?.response?.data;
+        const message = resp?.message || 'Failed to check in. Please try again.';
+        setKioskError({
+          message,
+          code: resp?.code || null,
+          user: resp?.user || null,
+        });
+        if (mode === 'qr') {
+          lastProcessedScanRef.current = '';
+          setScanValue('');
+        }
+        return false;
+      } finally {
+        setKioskLoading(false);
+        kioskSubmitLockRef.current = false;
+      }
+    },
+    [kioskLoading, navigate],
+  );
 
   const resetKioskState = useCallback(() => {
     setKioskMode(null);
@@ -152,47 +242,9 @@ export function useKioskCheckIn() {
     async (e) => {
       e?.preventDefault?.();
       if (!kioskMode) return;
-      if (kioskLoading || kioskSubmitLockRef.current) return;
-      const trimmed = scanValue.trim();
-      if (!trimmed) return;
-      if (kioskMode === 'qr' && lastProcessedScanRef.current === trimmed) return;
-      try {
-        kioskSubmitLockRef.current = true;
-        if (kioskMode === 'qr') lastProcessedScanRef.current = trimmed;
-        setShowReceipt(false);
-        setKioskLoading(true);
-        setKioskResult(null);
-        setKioskError(null);
-        const payload =
-          kioskMode === 'qr'
-            ? { mode: 'qr', payload: trimmed }
-            : { mode: 'id', id: trimmed };
-        const data = await authService.kioskCheckIn(payload);
-        if (kioskMode === 'qr') {
-          setScanValue('');
-          navigate('/kiosk/appointment', { state: { kioskResult: data } });
-          return;
-        }
-        setKioskResult(data);
-        setShowReceipt(true);
-      } catch (err) {
-        const resp = err?.response?.data;
-        const message = resp?.message || 'Failed to check in. Please try again.';
-        setKioskError({
-          message,
-          code: resp?.code || null,
-          user: resp?.user || null,
-        });
-        if (kioskMode === 'qr') {
-          lastProcessedScanRef.current = '';
-          setScanValue('');
-        }
-      } finally {
-        setKioskLoading(false);
-        kioskSubmitLockRef.current = false;
-      }
+      await submitKioskScan(kioskMode, scanValue);
     },
-    [kioskMode, kioskLoading, scanValue, navigate]
+    [kioskMode, scanValue, submitKioskScan]
   );
 
   useEffect(() => {
@@ -262,36 +314,7 @@ export function useKioskCheckIn() {
       clearTimeout(qrAutoSubmitTimerRef.current);
     }
     qrAutoSubmitTimerRef.current = setTimeout(() => {
-      if (kioskSubmitLockRef.current) return;
-      if (lastProcessedScanRef.current === extractedId) return;
-
-      (async () => {
-        kioskSubmitLockRef.current = true;
-        lastProcessedScanRef.current = extractedId;
-        try {
-          setShowReceipt(false);
-          setKioskLoading(true);
-          setKioskResult(null);
-          setKioskError(null);
-          const payload = { mode: 'qr', payload: extractedId };
-          const data = await authService.kioskCheckIn(payload);
-          setScanValue('');
-          navigate('/kiosk/appointment', { state: { kioskResult: data } });
-        } catch (err) {
-          const resp = err?.response?.data;
-          const message = resp?.message || 'Failed to check in. Please try again.';
-          setKioskError({
-            message,
-            code: resp?.code || null,
-            user: resp?.user || null,
-          });
-          lastProcessedScanRef.current = '';
-        } finally {
-          setKioskLoading(false);
-          kioskSubmitLockRef.current = false;
-          setScanValue('');
-        }
-      })();
+      submitKioskScan('qr', extractedId);
     }, 120);
 
     return () => {
@@ -299,7 +322,7 @@ export function useKioskCheckIn() {
         clearTimeout(qrAutoSubmitTimerRef.current);
       }
     };
-  }, [kioskMode, scanValue, kioskLoading, showReceipt, kioskResult, navigate]);
+  }, [kioskMode, scanValue, kioskLoading, showReceipt, kioskResult, submitKioskScan]);
 
   return {
     kioskMode,

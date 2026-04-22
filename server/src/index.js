@@ -730,6 +730,8 @@ function buildKioskResult({ user, appointment, queueNumber, checkInDate = new Da
     queueNumber: queueNumber || '',
     checkInDate: getTodayInManila(checkInDate),
     checkInDateDisplay: formatKioskCheckInDate(checkInDate),
+    checkInConfirmed: Boolean(queueNumber),
+    confirmationRequired: Boolean(appointment && !queueNumber),
     user: buildKioskUserPayload(user),
     hasAppointmentToday: Boolean(appointment),
     appointment: mapKioskAppointment(appointment),
@@ -1062,6 +1064,24 @@ async function ensureQueueForAppointment(appointmentRow) {
   return rows[0] || null;
 }
 
+async function getExistingQueueForAppointment(appointmentId) {
+  if (!appointmentId) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT *
+      FROM public.queues
+      WHERE appointment_id = $1
+      LIMIT 1
+    `,
+    [appointmentId],
+  );
+
+  return rows[0] || null;
+}
+
 function buildNonCheckInQueueLabel(appointmentRow) {
   const appointmentCode = String(appointmentRow?.appointment_code || '').trim().toUpperCase();
   if (appointmentCode) {
@@ -1106,6 +1126,156 @@ async function ensureQueueForAppointmentWithClient(client, appointmentRow) {
   );
 
   return rows[0] || null;
+}
+
+async function findKioskUserByIdentifier(identifier) {
+  if (!identifier) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        id,
+        firstname,
+        middle_initial,
+        lastname,
+        email,
+        student_number,
+        employee_number,
+        college,
+        program,
+        id_number,
+        qr_data,
+        user_type,
+        role
+      FROM public.users_auth
+      WHERE UPPER(COALESCE(student_number, '')) = UPPER($1)
+         OR UPPER(COALESCE(employee_number, '')) = UPPER($1)
+         OR UPPER(COALESCE(id_number, '')) = UPPER($1)
+         OR COALESCE(qr_data, '') = $1
+      ORDER BY created_at ASC
+      LIMIT 1
+    `,
+    [identifier],
+  );
+
+  return rows[0] || null;
+}
+
+async function findActiveKioskAppointmentForUser(userId, date = getTodayInManila()) {
+  if (!userId) {
+    return null;
+  }
+
+  const completedStatus = await toDatabaseAppointmentStatus('Completed');
+  const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+  const { rows } = await pool.query(
+    `
+      SELECT *
+      FROM public.appointments
+      WHERE user_id = $1
+        AND appointment_date = $2
+        AND status NOT IN ($3, $4)
+      ORDER BY created_at ASC
+      LIMIT 1
+    `,
+    [userId, date, completedStatus, notCompletedStatus],
+  );
+
+  return rows[0] || null;
+}
+
+async function findKioskCheckInContextByAppointmentId(appointmentId) {
+  if (!appointmentId) {
+    return { user: null, appointment: null };
+  }
+
+  const today = getTodayInManila();
+  const completedStatus = await toDatabaseAppointmentStatus('Completed');
+  const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+  const { rows } = await pool.query(
+    `
+      SELECT
+        a.*,
+        u.id AS kiosk_user_id,
+        u.firstname AS kiosk_firstname,
+        u.middle_initial AS kiosk_middle_initial,
+        u.lastname AS kiosk_lastname,
+        u.email AS kiosk_email,
+        u.student_number AS kiosk_student_number,
+        u.employee_number AS kiosk_employee_number,
+        u.college AS kiosk_college,
+        u.program AS kiosk_program,
+        u.id_number AS kiosk_id_number,
+        u.qr_data AS kiosk_qr_data,
+        u.user_type AS kiosk_user_type,
+        u.role AS kiosk_role
+      FROM public.appointments AS a
+      JOIN public.users_auth AS u
+        ON u.id = a.user_id
+      WHERE a.id = $1
+        AND a.appointment_date = $2
+        AND a.status NOT IN ($3, $4)
+      LIMIT 1
+    `,
+    [appointmentId, today, completedStatus, notCompletedStatus],
+  );
+
+  const row = rows[0];
+  if (!row) {
+    return { user: null, appointment: null };
+  }
+
+  return {
+    appointment: row,
+    user: {
+      id: row.kiosk_user_id,
+      firstname: row.kiosk_firstname,
+      middle_initial: row.kiosk_middle_initial,
+      lastname: row.kiosk_lastname,
+      email: row.kiosk_email,
+      student_number: row.kiosk_student_number,
+      employee_number: row.kiosk_employee_number,
+      college: row.kiosk_college,
+      program: row.kiosk_program,
+      id_number: row.kiosk_id_number,
+      qr_data: row.kiosk_qr_data,
+      user_type: row.kiosk_user_type,
+      role: row.kiosk_role,
+    },
+  };
+}
+
+async function finalizeKioskCheckIn({ user, appointment }) {
+  if (!user?.id || !appointment?.id) {
+    throw new Error('A valid kiosk user and appointment are required.');
+  }
+
+  const queueRow = await ensureQueueForAppointment(appointment);
+  const client = await pool.connect();
+  let syncedAppointment = appointment;
+  try {
+    await client.query('BEGIN');
+    syncedAppointment = await syncAppointmentStatusFromQueue(
+      client,
+      queueRow?.id || null,
+      queueRow?.status || 'Waiting',
+      appointment.id,
+    ) || appointment;
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return buildKioskResult({
+    user,
+    appointment: syncedAppointment,
+    queueNumber: queueRow?.queue_number || '',
+  });
 }
 
 async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appointmentId = null) {
@@ -2620,34 +2790,7 @@ app.post('/api/kiosk/check-in', async (req, res) => {
   }
 
   try {
-    const completedStatus = await toDatabaseAppointmentStatus('Completed');
-    const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
-    const userLookup = await pool.query(
-      `
-        SELECT
-          id,
-          firstname,
-          middle_initial,
-          lastname,
-          email,
-          student_number,
-          employee_number,
-          college,
-          program,
-          id_number,
-          qr_data
-        FROM public.users_auth
-        WHERE UPPER(COALESCE(student_number, '')) = UPPER($1)
-           OR UPPER(COALESCE(employee_number, '')) = UPPER($1)
-           OR UPPER(COALESCE(id_number, '')) = UPPER($1)
-           OR COALESCE(qr_data, '') = $1
-        ORDER BY created_at ASC
-        LIMIT 1
-      `,
-      [identifier],
-    );
-
-    const user = userLookup.rows[0];
+    const user = await findKioskUserByIdentifier(identifier);
     if (!user) {
       return res.status(404).json({
         code: 'USER_NOT_FOUND',
@@ -2655,21 +2798,7 @@ app.post('/api/kiosk/check-in', async (req, res) => {
       });
     }
 
-    const today = getTodayInManila();
-    const appointmentLookup = await pool.query(
-      `
-        SELECT *
-        FROM public.appointments
-        WHERE user_id = $1
-          AND appointment_date = $2
-          AND status NOT IN ($3, $4)
-        ORDER BY created_at ASC
-        LIMIT 1
-      `,
-      [user.id, today, completedStatus, notCompletedStatus],
-    );
-
-    const appointment = appointmentLookup.rows[0] || null;
+    const appointment = await findActiveKioskAppointmentForUser(user.id);
     if (!appointment) {
       return res.status(404).json({
         code: 'NO_APPOINTMENT_TODAY',
@@ -2744,36 +2873,69 @@ app.post('/api/kiosk/check-in', async (req, res) => {
       }
     }
 
-    const queueRow = await ensureQueueForAppointment(appointment);
-    const client = await pool.connect();
-    let syncedAppointment = appointment;
-    try {
-      await client.query('BEGIN');
-      syncedAppointment = await syncAppointmentStatusFromQueue(
-        client,
-        queueRow?.id || null,
-        queueRow?.status || 'Waiting',
-        appointment.id,
-      ) || appointment;
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      return res.status(500).json({
-        message: 'Failed to sync appointment status after kiosk check-in.',
-        error: error.message,
-      });
-    } finally {
-      client.release();
+    const existingQueue = await getExistingQueueForAppointment(appointment.id);
+    if (existingQueue?.checked_in_at) {
+      return res.json(buildKioskResult({
+        user,
+        appointment,
+        queueNumber: existingQueue.queue_number || '',
+      }));
     }
 
     return res.json(buildKioskResult({
       user,
-      appointment: syncedAppointment,
-      queueNumber: queueRow?.queue_number || '',
+      appointment,
+      queueNumber: '',
     }));
   } catch (error) {
     return res.status(500).json({
       message: 'Failed to complete kiosk check-in.',
+      error: error.message,
+    });
+  }
+});
+
+app.post('/api/kiosk/confirm-check-in', async (req, res) => {
+  const appointmentId = normalizeIdentifier(req.body?.appointmentId);
+
+  if (!appointmentId) {
+    return res.status(400).json({ message: 'A valid appointment id is required.' });
+  }
+
+  try {
+    const { user, appointment } = await findKioskCheckInContextByAppointmentId(appointmentId);
+    if (!user || !appointment) {
+      return res.status(404).json({
+        code: 'NO_APPOINTMENT_TODAY',
+        message: 'No active appointment was found for today.',
+      });
+    }
+
+    const arrivalWindow = evaluateAppointmentArrivalWindow(appointment.time_slot);
+    if (arrivalWindow.status === 'early') {
+      return res.status(409).json({
+        code: 'APPOINTMENT_TOO_EARLY',
+        message: `Your appointment is scheduled for ${appointment.time_slot}. Please come back during your selected time window.`,
+        user: buildKioskUserPayload(user),
+        appointment: mapKioskAppointment(appointment),
+      });
+    }
+
+    if (arrivalWindow.status === 'missed') {
+      return res.status(409).json({
+        code: 'APPOINTMENT_SKIPPED',
+        message: `Your selected appointment time was ${appointment.time_slot}. This appointment can no longer be checked in because the time window has already passed.`,
+        skipped: true,
+        user: buildKioskUserPayload(user),
+        hasAppointmentToday: true,
+        appointment: mapKioskAppointment(appointment),
+      });
+    }
+
+    return res.json(await finalizeKioskCheckIn({ user, appointment }));
+  } catch (error) {
+    return res.status(500).json({
+      message: 'Failed to confirm kiosk check-in.',
       error: error.message,
     });
   }

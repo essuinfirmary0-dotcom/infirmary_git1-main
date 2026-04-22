@@ -6,7 +6,9 @@ import {
   useKioskCheckIn,
   formatIdInput,
   getKioskQrInputDisplayValue,
+  normalizeQrScanInput,
 } from '../hooks/useKioskCheckIn';
+import { authService } from '../services/authService';
 import { resolveKioskReceiptIdentity } from '../utils/kioskReceiptIdentity';
 import { printKioskReceipt } from '../utils/kioskPrintReceipt';
 
@@ -104,23 +106,22 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
 
 const RECEIPT_AUTO_CLOSE_SECONDS = 10;
 
-/** Set VITE_KIOSK_AUTO_PRINT=false in .env to disable automatic print dialog on receipt open. */
-const KIOSK_AUTO_PRINT =
-  typeof import.meta.env.VITE_KIOSK_AUTO_PRINT === 'string'
-    ? import.meta.env.VITE_KIOSK_AUTO_PRINT !== 'false'
-    : true;
-
 export function ReceiptOverlay({ kioskResult, onClose }) {
+  const [activeResult, setActiveResult] = useState(kioskResult);
   const [secondsLeft, setSecondsLeft] = useState(RECEIPT_AUTO_CLOSE_SECONDS);
+  const [confirmingCheckIn, setConfirmingCheckIn] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
   const closeRef = useRef(onClose);
   const didAutoCloseRef = useRef(false);
-  const autoPrintKeyRef = useRef(null);
 
   useEffect(() => {
     closeRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
+    setActiveResult(kioskResult);
+    setConfirmingCheckIn(false);
+    setConfirmError('');
     if (!kioskResult) return undefined;
     didAutoCloseRef.current = false;
     setSecondsLeft(RECEIPT_AUTO_CLOSE_SECONDS);
@@ -131,41 +132,65 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
   }, [kioskResult]);
 
   useEffect(() => {
-    if (!kioskResult || !KIOSK_AUTO_PRINT) return undefined;
-    const key = `${kioskResult.queueNumber}-${kioskResult.checkInDate ?? ''}`;
-    if (autoPrintKeyRef.current === key) return undefined;
-    autoPrintKeyRef.current = key;
-    const t = window.setTimeout(() => {
-      printKioskReceipt(kioskResult);
-    }, 650);
-    return () => window.clearTimeout(t);
-  }, [kioskResult]);
-
-  useEffect(() => {
-    if (!kioskResult || secondsLeft > 0) return;
+    if (!activeResult || confirmingCheckIn || secondsLeft > 0) return;
     if (didAutoCloseRef.current) return;
     didAutoCloseRef.current = true;
     closeRef.current();
-  }, [secondsLeft, kioskResult]);
+  }, [secondsLeft, activeResult, confirmingCheckIn]);
 
   const handleClose = () => {
     didAutoCloseRef.current = true;
     onClose();
   };
 
-  if (!kioskResult) return null;
+  const result = activeResult || kioskResult;
+  if (!result) return null;
 
   const pct = (secondsLeft / RECEIPT_AUTO_CLOSE_SECONDS) * 100;
-  const user = kioskResult.user || {};
+  const user = result.user || {};
   const receiptIdentity = resolveKioskReceiptIdentity(user);
   const isGuestUser = receiptIdentity.type === 'guest';
   const guestType = user.program?.trim() || '';
   const showCollege = !isGuestUser && Boolean(user.college?.trim());
   const showProgram = !isGuestUser && Boolean(user.program?.trim());
   const showGuestType = isGuestUser && Boolean(guestType);
+  const isCheckInConfirmed = Boolean(result.checkInConfirmed);
 
-  const handlePrint = () => {
-    printKioskReceipt(kioskResult);
+  const handlePrint = async () => {
+    if (confirmingCheckIn) return;
+
+    let resultToPrint = result;
+    setConfirmError('');
+
+    if (!isCheckInConfirmed) {
+      if (!result.appointment?.id) {
+        setConfirmError('This appointment cannot be confirmed right now. Please scan again.');
+        return;
+      }
+
+      try {
+        setConfirmingCheckIn(true);
+        didAutoCloseRef.current = false;
+        setSecondsLeft(RECEIPT_AUTO_CLOSE_SECONDS);
+        const confirmedResult = await authService.kioskConfirmCheckIn({
+          appointmentId: result.appointment.id,
+        });
+        resultToPrint = confirmedResult;
+        setActiveResult(confirmedResult);
+        didAutoCloseRef.current = false;
+        setSecondsLeft(RECEIPT_AUTO_CLOSE_SECONDS);
+      } catch (err) {
+        setConfirmError(
+          err?.response?.data?.message ||
+            'Check-in could not be confirmed. Please try again.',
+        );
+        return;
+      } finally {
+        setConfirmingCheckIn(false);
+      }
+    }
+
+    await printKioskReceipt(resultToPrint);
   };
 
   return (
@@ -183,26 +208,37 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
         <div className="space-y-4">
           <div className="text-center space-y-1 pr-8">
             <p className="text-[10px] font-black text-primary uppercase tracking-[0.25em]">
-              Kiosk Check-in Receipt
+              {isCheckInConfirmed ? 'Kiosk Check-in Receipt' : 'Kiosk Check-in Confirmation'}
             </p>
             <h3 className="font-black text-slate-900 text-2xl sm:text-3xl">
-              You&apos;re in the queue
+              {isCheckInConfirmed ? 'You&apos;re in the queue' : 'Confirm your check-in'}
             </h3>
-            {kioskResult.checkInDateDisplay && (
+            {result.checkInDateDisplay && (
               <p className="text-sm font-bold text-slate-600 pt-1">
-                {kioskResult.checkInDateDisplay}
+                {result.checkInDateDisplay}
               </p>
             )}
           </div>
 
-          <div className="flex flex-col items-center space-y-2">
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-[0.2em]">
-              Queue Number
-            </p>
-            <div className="px-6 py-3 rounded-full bg-slate-900 text-white font-black shadow-lg shadow-slate-900/40 text-3xl sm:text-4xl tracking-tight">
-              {kioskResult.queueNumber}
+          {isCheckInConfirmed && result.queueNumber ? (
+            <div className="flex flex-col items-center space-y-2">
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+                Queue Number
+              </p>
+              <div className="px-6 py-3 rounded-full bg-slate-900 text-white font-black shadow-lg shadow-slate-900/40 text-3xl sm:text-4xl tracking-tight">
+                {result.queueNumber}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-primary/25 bg-primary/5 px-5 py-4 text-center">
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
+                Queue Number Pending
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-700">
+                Click Print Receipt to save your check-in and assign your queue number.
+              </p>
+            </div>
+          )}
 
           <div className="w-full h-px bg-slate-200" />
 
@@ -259,14 +295,14 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
               )}
             </div>
           )}
-          {kioskResult.hasAppointmentToday && kioskResult.appointment && (
+          {result.hasAppointmentToday && result.appointment && (
             <div className="mt-1 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[11px] font-bold text-slate-500 uppercase tracking-[0.15em]">
                   Today&apos;s Appointment
                 </p>
                 <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-black tracking-wide">
-                  {kioskResult.appointment.code}
+                  {result.appointment.code}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -275,7 +311,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     Time
                   </p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {kioskResult.appointment.time}
+                    {result.appointment.time}
                   </p>
                 </div>
                 <div className="space-y-0.5">
@@ -283,7 +319,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     Status
                   </p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {kioskResult.appointment.status}
+                    {result.appointment.status}
                   </p>
                 </div>
                 <div className="space-y-0.5 col-span-2">
@@ -291,9 +327,9 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     Service
                   </p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {kioskResult.appointment.service}{' '}
-                    {kioskResult.appointment.subcategory
-                      ? `- ${kioskResult.appointment.subcategory}`
+                    {result.appointment.service}{' '}
+                    {result.appointment.subcategory
+                      ? `- ${result.appointment.subcategory}`
                       : ''}
                   </p>
                 </div>
@@ -303,7 +339,9 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
         </div>
 
           <p className="text-[11px] text-slate-500 text-center">
-            Please wait for your queue number to be called on the infirmary display.
+            {isCheckInConfirmed
+              ? 'Please wait for your queue number to be called on the infirmary display.'
+              : 'Printing the receipt is the final step that confirms and saves this kiosk check-in.'}
           </p>
         </div>
 
@@ -311,11 +349,21 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
           <button
             type="button"
             onClick={handlePrint}
-            className="w-full py-3.5 rounded-2xl border-2 border-primary/30 bg-primary/5 text-primary font-black text-sm sm:text-base flex items-center justify-center gap-2 hover:bg-primary/10 min-h-[48px]"
+            disabled={confirmingCheckIn}
+            className="w-full py-3.5 rounded-2xl border-2 border-primary/30 bg-primary/5 text-primary font-black text-sm sm:text-base flex items-center justify-center gap-2 hover:bg-primary/10 min-h-[48px] disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Printer size={20} aria-hidden />
-            Print receipt
+            {confirmingCheckIn
+              ? 'Confirming check-in...'
+              : isCheckInConfirmed
+                ? 'Print Receipt'
+                : 'Print Receipt to Confirm Check-in'}
           </button>
+          {confirmError && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {confirmError}
+            </div>
+          )}
           <div className="space-y-2">
             <div
               className="flex items-center justify-center gap-2 text-sm font-bold text-slate-700"
@@ -435,7 +483,7 @@ export function KioskCheckIn() {
             setScanValue(
               kioskMode === 'id'
                 ? formatIdInput(e.target.value)
-                : e.target.value
+                : normalizeQrScanInput(e.target.value, scanValue)
             )
           }
           className="w-full px-5 py-4 sm:py-5 rounded-2xl border-2 border-white/20 bg-white/95 text-slate-900 text-lg sm:text-xl font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/30 focus:border-primary min-h-[56px]"
