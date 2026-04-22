@@ -105,14 +105,18 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
 }
 
 const RECEIPT_AUTO_CLOSE_SECONDS = 10;
+const PRINT_BUTTON_ARM_DELAY_MS = 900;
 
 export function ReceiptOverlay({ kioskResult, onClose }) {
   const [activeResult, setActiveResult] = useState(kioskResult);
   const [secondsLeft, setSecondsLeft] = useState(RECEIPT_AUTO_CLOSE_SECONDS);
   const [confirmingCheckIn, setConfirmingCheckIn] = useState(false);
   const [confirmError, setConfirmError] = useState('');
+  const [printButtonReady, setPrintButtonReady] = useState(false);
   const closeRef = useRef(onClose);
   const didAutoCloseRef = useRef(false);
+  const armPrintTimerRef = useRef(null);
+  const overlayPanelRef = useRef(null);
 
   useEffect(() => {
     closeRef.current = onClose;
@@ -122,13 +126,42 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
     setActiveResult(kioskResult);
     setConfirmingCheckIn(false);
     setConfirmError('');
+    setPrintButtonReady(false);
+    if (armPrintTimerRef.current) {
+      clearTimeout(armPrintTimerRef.current);
+      armPrintTimerRef.current = null;
+    }
     if (!kioskResult) return undefined;
     didAutoCloseRef.current = false;
     setSecondsLeft(RECEIPT_AUTO_CLOSE_SECONDS);
+    if (typeof document !== 'undefined') {
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        typeof activeElement.blur === 'function' &&
+        activeElement !== document.body
+      ) {
+        activeElement.blur();
+      }
+    }
+    const focusTimerId = window.setTimeout(() => {
+      overlayPanelRef.current?.focus();
+    }, 0);
+    armPrintTimerRef.current = window.setTimeout(() => {
+      setPrintButtonReady(true);
+      armPrintTimerRef.current = null;
+    }, PRINT_BUTTON_ARM_DELAY_MS);
     const id = setInterval(() => {
       setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      clearTimeout(focusTimerId);
+      if (armPrintTimerRef.current) {
+        clearTimeout(armPrintTimerRef.current);
+        armPrintTimerRef.current = null;
+      }
+    };
   }, [kioskResult]);
 
   useEffect(() => {
@@ -157,7 +190,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
   const isCheckInConfirmed = Boolean(result.checkInConfirmed);
 
   const handlePrint = async () => {
-    if (confirmingCheckIn) return;
+    if (confirmingCheckIn || !printButtonReady) return;
 
     let resultToPrint = result;
     setConfirmError('');
@@ -195,7 +228,20 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm px-4">
-      <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-10 max-w-lg w-full shadow-2xl border border-slate-200 relative">
+      <div
+        ref={overlayPanelRef}
+        tabIndex={-1}
+        onKeyDownCapture={(e) => {
+          if (
+            !printButtonReady &&
+            (e.key === 'Enter' || e.key === ' ')
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-10 max-w-lg w-full shadow-2xl border border-slate-200 relative outline-none"
+      >
         <button
           type="button"
           onClick={handleClose}
@@ -349,11 +395,13 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
           <button
             type="button"
             onClick={handlePrint}
-            disabled={confirmingCheckIn}
+            disabled={confirmingCheckIn || !printButtonReady}
             className="w-full py-3.5 rounded-2xl border-2 border-primary/30 bg-primary/5 text-primary font-black text-sm sm:text-base flex items-center justify-center gap-2 hover:bg-primary/10 min-h-[48px] disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Printer size={20} aria-hidden />
-            {confirmingCheckIn
+            {!printButtonReady
+              ? 'Preparing receipt...'
+              : confirmingCheckIn
               ? 'Confirming check-in...'
               : isCheckInConfirmed
                 ? 'Print Receipt'
