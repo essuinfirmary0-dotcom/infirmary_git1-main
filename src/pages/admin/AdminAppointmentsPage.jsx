@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, isSameDay, parseISO, addDays, isSameWeek, isSameMonth, compareAsc, compareDesc } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List, Building2, GraduationCap } from 'lucide-react';
+import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List, Building2, GraduationCap, IdCard } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
+import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 
 const DATE_SCOPE_OPTIONS = [
   { value: 'all', label: 'All Dates' },
@@ -86,9 +87,15 @@ const getScopeLabel = (scope, specificDate) => {
 
 const AppointmentDetailModal = ({ appointment, onClose }) => {
   if (!appointment) return null;
-  const isGuestAppointment = String(appointment.userType || '').trim().toLowerCase() === 'guest';
-  const showCollege = !isGuestAppointment && Boolean(appointment.college?.trim());
-  const showProgram = !isGuestAppointment && Boolean(appointment.program?.trim());
+  const {
+    receiptIdentity,
+    showCollege,
+    showProgram,
+    showGuestType,
+    college,
+    program,
+    guestType,
+  } = resolveKioskReceiptProfile(appointment);
 
   return (
     <AnimatePresence>
@@ -117,19 +124,48 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
             <div className="grid grid-cols-1 gap-4">
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Patient</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-primary">
-                    <User size={18} />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-primary">
+                      <User size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800">{appointment.patientName || 'Anonymous'}</p>
+                      <p className="text-xs text-slate-500">Review the complete patient and booking details below.</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800">{appointment.patientName || 'Anonymous'}</p>
-                    <p className="text-xs text-slate-500">{appointment.appointmentCode || 'No code'}</p>
+                  {appointment.status && (
+                    <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
+                      {appointment.status}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-200">
+                  <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Appointment Code</p>
+                    <p className="text-sm font-black text-primary">{appointment.appointmentCode || 'No code'}</p>
+                  </div>
+
+                  {receiptIdentity.value && (
+                    <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                        <IdCard size={12} />
+                        {receiptIdentity.label}
+                      </p>
+                      <p className="text-sm font-black text-slate-800">{receiptIdentity.value}</p>
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                    <p className="text-sm font-black text-slate-800">{appointment.status || 'Waiting'}</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {(showCollege || showProgram) && (
+            {(showCollege || showProgram || showGuestType) && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {showCollege && (
                   <div className="bg-white rounded-2xl p-4 border border-slate-100">
@@ -137,7 +173,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                       <Building2 size={12} />
                       College
                     </p>
-                    <p className="text-sm font-black text-slate-800">{appointment.college}</p>
+                    <p className="text-sm font-black text-slate-800">{college}</p>
                   </div>
                 )}
 
@@ -147,7 +183,17 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                       <GraduationCap size={12} />
                       Department / Program
                     </p>
-                    <p className="text-sm font-black text-slate-800">{appointment.program}</p>
+                    <p className="text-sm font-black text-slate-800">{program}</p>
+                  </div>
+                )}
+
+                {showGuestType && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <GraduationCap size={12} />
+                      Type of Guest
+                    </p>
+                    <p className="text-sm font-black text-slate-800">{guestType}</p>
                   </div>
                 )}
               </div>
@@ -168,7 +214,10 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                   <Tag size={12} />
                   Service
                 </p>
-                <p className="text-sm font-black text-slate-800">{appointment.service}</p>
+                <p className="text-sm font-black text-slate-800">
+                  {appointment.service}
+                  {appointment.subcategory ? ` - ${appointment.subcategory}` : ''}
+                </p>
               </div>
             </div>
 

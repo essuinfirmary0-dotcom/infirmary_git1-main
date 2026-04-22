@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: essu-infirmary-connect
+    runtime: node
+    plan: free
+    region: singapore
+    autoDeployTrigger: commit
+    healthCheckPath: /api/health
+    buildCommand: npm ci && npm --prefix server ci && npm run build
+    startCommand: npm --prefix server start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: infirmary-attachments
+      - key: SUPABASE_STORAGE_SIGNED_URL_TTL
+        value: "3600"

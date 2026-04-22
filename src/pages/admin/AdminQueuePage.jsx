@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { queueService } from '../../services/queueService';
-import { Clock, Users, Filter, CheckCircle, Grid3x3, List, XCircle } from 'lucide-react';
+import { Clock, Users, Filter, CheckCircle, Grid3x3, List, XCircle, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { addDays, compareAsc, format, isSameDay, isSameMonth, isSameWeek, parseISO } from 'date-fns';
+import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 
 const STATUS_OPTIONS = ['All', 'Waiting', 'Serving', 'Completed', 'Skipped'];
 const DATE_SCOPE_OPTIONS = [
@@ -26,6 +27,33 @@ const NOT_COMPLETED_REASONS = [
   'Late/Did not attend',
   'Missing requirements',
 ];
+
+const resolveQueueReceiptProfile = (queue) =>
+  resolveKioskReceiptProfile({
+    userType: queue?.user?.userType,
+    studentNumber: queue?.user?.studentNumber,
+    employeeNumber: queue?.user?.employeeNumber,
+    idNumber: queue?.user?.idNumber,
+    college: queue?.user?.college,
+    program: queue?.user?.program,
+  });
+
+const formatQueuePatientDate = (queue) =>
+  queue?.appointment?.date
+    ? new Date(queue.appointment.date).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+    : queue?.createdAt
+      ? new Date(queue.createdAt).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+      : 'No date';
+
+const formatQueuePatientShortDate = (queue) =>
+  queue?.appointment?.date
+    ? new Date(queue.appointment.date).toLocaleDateString([], { month: 'short', day: 'numeric' })
+    : queue?.createdAt
+      ? new Date(queue.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : 'No date';
+
+const formatQueuePatientTime = (queue) =>
+  queue?.appointment?.time || (queue?.createdAt ? new Date(queue.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No time');
 
 const toQueueDate = (queue) => {
   if (queue?.appointment?.date) {
@@ -330,179 +358,260 @@ export const AdminQueuePage = () => {
           </div>
         ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {filteredQueues.map((q) => (
-              <div
-                key={q.id}
-                onClick={() => handleServePatient(q)}
-                className="p-4 rounded-xl border border-slate-100 bg-slate-50/80 flex flex-col gap-3 hover:bg-white hover:border-primary/20 hover:shadow-md transition-all"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">
-                      {filteredQueues[0]?.id === q.id ? 'Up Next' : 'Queue'}
-                    </p>
-                    <p className="text-lg font-black text-slate-900">{q.queueNumber || '-'}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Status</p>
-                    <p className="text-sm font-black text-slate-800">{q.status === 'Serving' ? 'Being Served' : q.status}</p>
-                  </div>
-                </div>
+            {filteredQueues.map((q) => {
+              const patientProfile = resolveQueueReceiptProfile(q);
+              const receiptIdentity = patientProfile.receiptIdentity;
 
-                <div className="bg-white border border-slate-100 rounded-xl p-3 space-y-1.5">
-                  <p className="text-sm font-black text-slate-900">
-                    {q.user?.name || 'Unknown patient'}
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-semibold">
-                    {q.user?.studentNumber || q.user?.employeeNumber || 'No ID'}
-                  </p>
-                  {q.appointment?.service && (
-                    <>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Booked Service</p>
-                      <p className="text-sm font-black text-slate-800">
-                        {q.appointment.service}
-                        {q.appointment.subcategory ? ` - ${q.appointment.subcategory}` : ''}
-                      </p>
-                    </>
-                  )}
-                  {q.appointment?.purpose && (
-                    <>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Purpose</p>
-                      <p className="text-sm font-semibold text-slate-700">{q.appointment.purpose}</p>
-                    </>
-                  )}
-                  {q.appointment?.notes && (
-                    <>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Notes</p>
-                      <p className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{q.appointment.notes}</p>
-                    </>
-                  )}
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">When To Take Patient</p>
-                  <p className="text-sm font-black text-slate-800">
-                    {q.appointment?.date
-                      ? new Date(q.appointment.date).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
-                      : q.createdAt
-                        ? new Date(q.createdAt).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
-                        : 'No date'}
-                  </p>
-                  <p className="text-sm font-semibold text-slate-600">
-                    {q.appointment?.time || (q.createdAt ? new Date(q.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No time')}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleServePatient(q);
-                    }}
-                    className="flex-1 py-2.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/10 transition-all disabled:opacity-60"
-                  >
-                    {q.status === 'Serving' ? 'Record Service Result' : 'Serve Patient'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSkipPatient(q);
-                    }}
-                    className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-600 text-[11px] font-black uppercase tracking-[0.14em] hover:bg-red-100 transition-all disabled:opacity-40"
-                  >
-                    Skip Patient
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredQueues.map((q) => (
-              <div
-                key={q.id}
-                onClick={() => handleServePatient(q)}
-                className="p-4 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="min-w-fit">
+              return (
+                <div
+                  key={q.id}
+                  onClick={() => handleServePatient(q)}
+                  className="p-4 rounded-xl border border-slate-100 bg-slate-50/80 flex flex-col gap-3 hover:bg-white hover:border-primary/20 hover:shadow-md transition-all"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">
                         {filteredQueues[0]?.id === q.id ? 'Up Next' : 'Queue'}
                       </p>
-                      <p className="text-xl font-black text-slate-900">{q.queueNumber || '-'}</p>
+                      <p className="text-lg font-black text-slate-900">{q.queueNumber || '-'}</p>
                     </div>
-                    <div className="flex-1 border-l border-slate-200 pl-4">
-                      <p className="text-sm font-black text-slate-900">
-                        {q.user?.name || 'Unknown patient'}
-                      </p>
-                      <p className="text-xs text-slate-500 font-semibold">
-                        {q.user?.studentNumber || q.user?.employeeNumber || 'No ID'}
-                      </p>
-                    </div>
-                    <div className="hidden sm:block border-l border-slate-200 pl-4 min-w-fit">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">When To Take Patient</p>
-                      <p className="text-sm font-black text-slate-800">
-                        {q.appointment?.date
-                          ? new Date(q.appointment.date).toLocaleDateString([], { month: 'short', day: 'numeric' })
-                          : q.createdAt
-                            ? new Date(q.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })
-                            : 'No date'}
-                      </p>
-                      <p className="text-xs font-semibold text-slate-600">
-                        {q.appointment?.time || (q.createdAt ? new Date(q.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No time')}
-                      </p>
-                    </div>
-                    <div className="hidden lg:block border-l border-slate-200 pl-4 min-w-fit max-w-65">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Booked Details</p>
-                      <p className="text-sm font-black text-slate-800">
-                        {q.appointment?.service || 'No service'}
-                        {q.appointment?.subcategory ? ` - ${q.appointment.subcategory}` : ''}
-                      </p>
-                      <p className="text-xs font-semibold text-slate-600 mt-1">
-                        {q.appointment?.purpose || 'No purpose provided'}
-                      </p>
-                      {q.appointment?.notes && (
-                        <p className="text-xs text-slate-500 font-medium mt-1 line-clamp-2 whitespace-pre-wrap">
-                          {q.appointment.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 min-w-fit">
                     <div className="text-right">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Status</p>
                       <p className="text-sm font-black text-slate-800">{q.status === 'Serving' ? 'Being Served' : q.status}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleServePatient(q);
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 text-primary text-[11px] font-black hover:bg-primary/10 transition-all disabled:opacity-60"
-                      >
-                        {q.status === 'Serving' ? 'Record Result' : 'Serve Patient'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSkipPatient(q);
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 text-[11px] font-black hover:bg-red-100 transition-all disabled:opacity-40"
-                      >
-                        Skip Patient
-                      </button>
+                  </div>
+
+                  <div className="bg-white border border-slate-100 rounded-xl p-3 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-slate-900">
+                          {q.user?.name || 'Unknown patient'}
+                        </p>
+                        {q.appointment?.code && (
+                          <p className="text-[11px] font-bold text-primary mt-1">
+                            {q.appointment.code}
+                          </p>
+                        )}
+                      </div>
+                      {receiptIdentity.value && (
+                        <div className="text-right shrink-0">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">
+                            {receiptIdentity.label}
+                          </p>
+                          <p className="text-xs font-black text-slate-800">{receiptIdentity.value}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {(patientProfile.showCollege || patientProfile.showProgram || patientProfile.showGuestType) && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-3 border-t border-slate-100">
+                        {patientProfile.showCollege && (
+                          <div className="flex items-start gap-2 text-xs text-slate-700">
+                            <Building2 size={14} className="text-primary shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">College</p>
+                              <p className="font-semibold text-slate-800">{patientProfile.college}</p>
+                            </div>
+                          </div>
+                        )}
+                        {patientProfile.showProgram && (
+                          <div className="flex items-start gap-2 text-xs text-slate-700">
+                            <GraduationCap size={14} className="text-primary shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">Department / Program</p>
+                              <p className="font-semibold text-slate-800">{patientProfile.program}</p>
+                            </div>
+                          </div>
+                        )}
+                        {patientProfile.showGuestType && (
+                          <div className="flex items-start gap-2 text-xs text-slate-700">
+                            <GraduationCap size={14} className="text-primary shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">Type of Guest</p>
+                              <p className="font-semibold text-slate-800">{patientProfile.guestType}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-100">
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">When To Take Patient</p>
+                        <p className="text-sm font-black text-slate-800">{formatQueuePatientDate(q)}</p>
+                        <p className="text-sm font-semibold text-slate-600">{formatQueuePatientTime(q)}</p>
+                      </div>
+                      {q.appointment?.service && (
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Booked Service</p>
+                          <p className="text-sm font-black text-slate-800">
+                            {q.appointment.service}
+                            {q.appointment.subcategory ? ` - ${q.appointment.subcategory}` : ''}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {q.appointment?.purpose && (
+                      <div className="pt-3 border-t border-slate-100">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Purpose</p>
+                        <p className="text-sm font-semibold text-slate-700">{q.appointment.purpose}</p>
+                      </div>
+                    )}
+
+                    {q.appointment?.notes && (
+                      <div className="pt-3 border-t border-slate-100">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Notes</p>
+                        <p className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{q.appointment.notes}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleServePatient(q);
+                      }}
+                      className="flex-1 py-2.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/10 transition-all disabled:opacity-60"
+                    >
+                      {q.status === 'Serving' ? 'Record Service Result' : 'Serve Patient'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSkipPatient(q);
+                      }}
+                      className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-600 text-[11px] font-black uppercase tracking-[0.14em] hover:bg-red-100 transition-all disabled:opacity-40"
+                    >
+                      Skip Patient
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredQueues.map((q) => {
+              const patientProfile = resolveQueueReceiptProfile(q);
+              const receiptIdentity = patientProfile.receiptIdentity;
+
+              return (
+                <div
+                  key={q.id}
+                  onClick={() => handleServePatient(q)}
+                  className="p-4 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="min-w-fit">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">
+                          {filteredQueues[0]?.id === q.id ? 'Up Next' : 'Queue'}
+                        </p>
+                        <p className="text-xl font-black text-slate-900">{q.queueNumber || '-'}</p>
+                      </div>
+                      <div className="flex-1 border-l border-slate-200 pl-4 min-w-0">
+                        <p className="text-sm font-black text-slate-900">
+                          {q.user?.name || 'Unknown patient'}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs font-semibold text-slate-500">
+                          {receiptIdentity.value && (
+                            <span className="inline-flex items-center gap-1">
+                              <IdCard size={12} />
+                              {receiptIdentity.label} {receiptIdentity.value}
+                            </span>
+                          )}
+                          {q.appointment?.code && (
+                            <span className="text-primary font-bold">{q.appointment.code}</span>
+                          )}
+                        </div>
+                        {(patientProfile.showCollege || patientProfile.showProgram || patientProfile.showGuestType) && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-600">
+                            {patientProfile.showCollege && (
+                              <span className="inline-flex items-center gap-1">
+                                <Building2 size={12} />
+                                {patientProfile.college}
+                              </span>
+                            )}
+                            {patientProfile.showProgram && (
+                              <span className="inline-flex items-center gap-1">
+                                <GraduationCap size={12} />
+                                {patientProfile.program}
+                              </span>
+                            )}
+                            {patientProfile.showGuestType && (
+                              <span className="inline-flex items-center gap-1">
+                                <GraduationCap size={12} />
+                                {patientProfile.guestType}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="hidden sm:block border-l border-slate-200 pl-4 min-w-fit">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">When To Take Patient</p>
+                        <p className="text-sm font-black text-slate-800">
+                          {formatQueuePatientShortDate(q)}
+                        </p>
+                        <p className="text-xs font-semibold text-slate-600">
+                          {formatQueuePatientTime(q)}
+                        </p>
+                      </div>
+                      <div className="hidden lg:block border-l border-slate-200 pl-4 min-w-fit max-w-65">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Booked Details</p>
+                        <p className="text-sm font-black text-slate-800">
+                          {q.appointment?.service || 'No service'}
+                          {q.appointment?.subcategory ? ` - ${q.appointment.subcategory}` : ''}
+                        </p>
+                        <p className="text-xs font-semibold text-slate-600 mt-1">
+                          {q.appointment?.purpose || 'No purpose provided'}
+                        </p>
+                        {q.appointment?.notes && (
+                          <p className="text-xs text-slate-500 font-medium mt-1 line-clamp-2 whitespace-pre-wrap">
+                            {q.appointment.notes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 min-w-fit">
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Status</p>
+                        <p className="text-sm font-black text-slate-800">{q.status === 'Serving' ? 'Being Served' : q.status}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleServePatient(q);
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 text-primary text-[11px] font-black hover:bg-primary/10 transition-all disabled:opacity-60"
+                        >
+                          {q.status === 'Serving' ? 'Record Result' : 'Serve Patient'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSkipPatient(q);
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 text-[11px] font-black hover:bg-red-100 transition-all disabled:opacity-40"
+                        >
+                          Skip Patient
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

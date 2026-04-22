@@ -9,10 +9,13 @@ import { checkDatabaseConnection, pool } from './config/db.js';
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', true);
 const port = Number(process.env.PORT || 5000);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadsDir = path.resolve(__dirname, '../uploads');
+const clientDistDir = path.resolve(__dirname, '../../dist');
+const clientIndexPath = path.join(clientDistDir, 'index.html');
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionTtlMs = Math.max(Number(process.env.AUTH_TOKEN_TTL_MS || 7 * 24 * 60 * 60 * 1000), 5 * 60 * 1000);
 const authTokenSecret = String(process.env.AUTH_TOKEN_SECRET || process.env.JWT_SECRET || '').trim();
@@ -43,8 +46,29 @@ if (isProduction && !authTokenSecret) {
   throw new Error('AUTH_TOKEN_SECRET is required in production.');
 }
 
-function isOriginAllowed(origin) {
+function getRequestBaseOrigin(req) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '')
+    .split(',')[0]
+    .trim();
+  const host = forwardedHost || String(req.headers.host || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol || (isProduction ? 'https' : 'http');
+
+  if (!host) {
+    return '';
+  }
+
+  return `${protocol}://${host}`;
+}
+
+function isOriginAllowed(origin, requestBaseOrigin = '') {
   if (!origin) {
+    return true;
+  }
+
+  if (requestBaseOrigin && origin === requestBaseOrigin) {
     return true;
   }
 
@@ -57,11 +81,13 @@ function isOriginAllowed(origin) {
 
 app.use((req, res, next) => {
   const requestOrigin = String(req.headers.origin || '').trim();
-  if (requestOrigin && !isOriginAllowed(requestOrigin)) {
+  const requestBaseOrigin = getRequestBaseOrigin(req);
+
+  if (requestOrigin && !isOriginAllowed(requestOrigin, requestBaseOrigin)) {
     return res.status(403).json({ message: 'This origin is not allowed to access the API.' });
   }
 
-  if (requestOrigin && isOriginAllowed(requestOrigin)) {
+  if (requestOrigin && isOriginAllowed(requestOrigin, requestBaseOrigin)) {
     res.header('Access-Control-Allow-Origin', requestOrigin);
     res.header('Vary', 'Origin');
   }
@@ -448,6 +474,9 @@ function mapAppointmentRow(row) {
     cancellationReason: row.cancellation_reason || '',
     college: row.appointment_college || '',
     program: row.appointment_program || '',
+    studentNumber: row.appointment_student_number || null,
+    employeeNumber: row.appointment_employee_number || null,
+    idNumber: row.appointment_id_number || null,
     userType: getEffectiveUserType({
       user_type: row.appointment_user_type,
       role: row.appointment_user_role,
@@ -509,10 +538,17 @@ function mapQueueRow(row) {
     user: row.user_id
       ? {
         id: row.user_id,
-        name: [row.user_firstname, row.user_lastname].filter(Boolean).join(' ') || row.user_email || 'Unknown',
+        name: [row.user_firstname, row.user_middle_initial, row.user_lastname].filter(Boolean).join(' ') || row.user_email || 'Unknown',
         email: row.user_email || '',
         studentNumber: row.user_student_number || null,
         employeeNumber: row.user_employee_number || null,
+        idNumber: row.user_id_number || null,
+        college: row.user_college || '',
+        program: row.user_program || '',
+        userType: getEffectiveUserType({
+          user_type: row.user_user_type,
+          role: row.user_role,
+        }) || null,
       }
       : null,
     appointment: row.appointment_id
@@ -3359,6 +3395,9 @@ app.get('/api/appointments', loadAuthenticatedUser, async (req, res) => {
           a.*,
           u.college AS appointment_college,
           u.program AS appointment_program,
+          u.student_number AS appointment_student_number,
+          u.employee_number AS appointment_employee_number,
+          u.id_number AS appointment_id_number,
           u.user_type AS appointment_user_type,
           u.role AS appointment_user_role
         FROM public.appointments AS a
@@ -3389,6 +3428,9 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
           a.*,
           u.college AS appointment_college,
           u.program AS appointment_program,
+          u.student_number AS appointment_student_number,
+          u.employee_number AS appointment_employee_number,
+          u.id_number AS appointment_id_number,
           u.user_type AS appointment_user_type,
           u.role AS appointment_user_role
         FROM public.appointments AS a
@@ -4077,10 +4119,16 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
           q.checked_in_at,
           q.status,
           u.firstname AS user_firstname,
+          u.middle_initial AS user_middle_initial,
           u.lastname AS user_lastname,
           u.email AS user_email,
           u.student_number AS user_student_number,
           u.employee_number AS user_employee_number,
+          u.id_number AS user_id_number,
+          u.college AS user_college,
+          u.program AS user_program,
+          u.user_type AS user_user_type,
+          u.role AS user_role,
           a.appointment_code,
           a.patient_name,
           a.appointment_date,
@@ -4328,6 +4376,22 @@ app.get('/api/health', async (_req, res) => {
     });
   }
 });
+
+if (fs.existsSync(clientIndexPath)) {
+  app.use(express.static(clientDistDir));
+
+  app.get('*', (req, res, next) => {
+    if (req.path === '/api' || req.path.startsWith('/api/')) {
+      return next();
+    }
+
+    if (req.path === '/uploads' || req.path.startsWith('/uploads/')) {
+      return next();
+    }
+
+    return res.sendFile(clientIndexPath);
+  });
+}
 
 async function runStartupMaintenance() {
   try {

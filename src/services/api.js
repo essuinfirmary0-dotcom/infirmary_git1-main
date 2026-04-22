@@ -1,6 +1,23 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://discerning-exploration-production-8d2a.up.railway.app';
+const RAILWAY_FALLBACK_URL = 'https://discerning-exploration-production-8d2a.up.railway.app';
+
+const trimTrailingSlash = (value) => String(value || '').trim().replace(/\/+$/, '');
+
+const resolveBaseUrl = () => {
+  const configuredUrl = trimTrailingSlash(import.meta.env.VITE_API_URL);
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
+    return trimTrailingSlash(window.location.origin);
+  }
+
+  return RAILWAY_FALLBACK_URL;
+};
+
+const BASE_URL = resolveBaseUrl();
 export const baseURL = BASE_URL;
 
 const api = axios.create({

@@ -69,3 +69,22 @@ export function resolveKioskReceiptIdentity(user = {}) {
     value: '',
   };
 }
+
+export function resolveKioskReceiptProfile(user = {}) {
+  const receiptIdentity = resolveKioskReceiptIdentity(user);
+  const isGuestUser = receiptIdentity.type === 'guest';
+  const college = !isGuestUser ? cleanValue(user.college) : '';
+  const program = !isGuestUser ? cleanValue(user.program) : '';
+  const guestType = isGuestUser ? cleanValue(user.guestType || user.program) : '';
+
+  return {
+    receiptIdentity,
+    isGuestUser,
+    guestType,
+    showCollege: Boolean(college),
+    showProgram: Boolean(program),
+    showGuestType: Boolean(guestType),
+    college,
+    program,
+  };
+}
