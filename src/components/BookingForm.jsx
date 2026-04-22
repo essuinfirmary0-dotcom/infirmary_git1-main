@@ -153,7 +153,13 @@ const buildStudentAcademicOptions = (departments = []) => {
 };
 
 const MAX_SLOTS = 50;
-const DEFAULT_TIME_SLOTS = ['8:00 AM - 11:00 AM', '1:00 PM - 4:00 PM', '4:00 PM - 7:00 PM', '7:00 PM - 11:00 PM'];
+const DEFAULT_TIME_SLOTS = [
+  '12:00 AM - 7:00 AM',
+  '8:00 AM - 11:00 AM',
+  '1:00 PM - 4:00 PM',
+  '4:00 PM - 7:00 PM',
+  '7:00 PM - 11:00 PM',
+];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
 
 const getAvailableSubcategoryOptions = (service) =>
@@ -992,7 +998,7 @@ export const BookingForm = ({
               ) : (
                 <div className="grid grid-cols-1 gap-4">
                   {slotsLoading ? (
-                    Array.from({ length: 3 }).map((_, idx) => (
+                    Array.from({ length: DEFAULT_TIME_SLOTS.length }).map((_, idx) => (
                       <div
                         key={idx}
                         className="p-4 rounded-2xl border border-slate-200 bg-slate-50 animate-pulse flex justify-between items-center"
