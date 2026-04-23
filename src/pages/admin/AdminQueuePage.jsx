@@ -11,11 +11,9 @@ import {
   Building2,
   GraduationCap,
   Mail,
-  RefreshCw,
   ClipboardList,
   FileText,
 } from 'lucide-react';
-import { addDays, format, isSameDay, isSameMonth, isSameWeek, isValid, parseISO } from 'date-fns';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 import { safeFormat } from '../../utils/dateUtils';
 import {
@@ -23,21 +21,6 @@ import {
   getQueueDisplayRows,
   QUEUE_DISPLAY_STATUSES,
 } from '../../utils/queueStatus';
-
-const STATUS_OPTIONS = [
-  { value: 'All', label: 'All Active' },
-  { value: QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING, label: QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING },
-  { value: QUEUE_DISPLAY_STATUSES.UP_NEXT, label: QUEUE_DISPLAY_STATUSES.UP_NEXT },
-  { value: QUEUE_DISPLAY_STATUSES.IN_LINE, label: QUEUE_DISPLAY_STATUSES.IN_LINE },
-];
-const DATE_SCOPE_OPTIONS = [
-  { value: 'today', label: 'Today' },
-  { value: 'all', label: 'All Dates' },
-  { value: 'tomorrow', label: 'Tomorrow' },
-  { value: 'thisWeek', label: 'This Week' },
-  { value: 'thisMonth', label: 'This Month' },
-  { value: 'specific', label: 'Specific Date' },
-];
 
 const resolveQueueReceiptProfile = (queue) =>
   resolveKioskReceiptProfile({
@@ -62,38 +45,6 @@ const formatQueueScheduleTime = (queue) =>
     ? safeFormat(queue.checkedInAt || queue.createdAt, 'p')
     : 'No time');
 
-const toQueueDate = (queue) => {
-  const rawValue = queue?.appointment?.date || queue?.checkedInAt || queue?.createdAt;
-  if (!rawValue) return null;
-
-  try {
-    const parsed = parseISO(rawValue);
-    if (isValid(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // Fall through to native Date parsing.
-  }
-
-  const fallback = new Date(rawValue);
-  return isValid(fallback) ? fallback : null;
-};
-
-const matchesQueueDateScope = (queue, scope, specificDate) => {
-  const queueDate = toQueueDate(queue);
-  if (!queueDate) return false;
-
-  const today = new Date();
-  const tomorrow = addDays(today, 1);
-
-  if (scope === 'today') return isSameDay(queueDate, today);
-  if (scope === 'tomorrow') return isSameDay(queueDate, tomorrow);
-  if (scope === 'thisWeek') return isSameWeek(queueDate, today, { weekStartsOn: 1 });
-  if (scope === 'thisMonth') return isSameMonth(queueDate, today);
-  if (scope === 'specific') return specificDate ? format(queueDate, 'yyyy-MM-dd') === specificDate : true;
-  return true;
-};
-
 const STATUS_TONE_CLASSES = {
   [QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING]: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   [QUEUE_DISPLAY_STATUSES.UP_NEXT]: 'border-amber-200 bg-amber-50 text-amber-700',
@@ -103,9 +54,6 @@ const STATUS_TONE_CLASSES = {
 export const AdminQueuePage = () => {
   const navigate = useNavigate();
   const [queues, setQueues] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [dateScope, setDateScope] = useState('today');
-  const [specificDate, setSpecificDate] = useState('');
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
   const [expandedQueueId, setExpandedQueueId] = useState(null);
@@ -143,14 +91,9 @@ export const AdminQueuePage = () => {
     }
   };
 
-  const { queueStats, filteredQueues } = useMemo(() => {
-    const scopedQueues = queues.filter((queue) => matchesQueueDateScope(queue, dateScope, specificDate));
-    const activeQueueRows = getQueueDisplayRows(scopedQueues);
-    const completedCount = getCompletedQueueEntries(scopedQueues).length;
-    const nextFilteredQueues =
-      statusFilter === 'All'
-        ? activeQueueRows
-        : activeQueueRows.filter((queue) => queue.displayStatus === statusFilter);
+  const { queueStats, queueRows } = useMemo(() => {
+    const activeQueueRows = getQueueDisplayRows(queues);
+    const completedCount = getCompletedQueueEntries(queues).length;
 
     return {
       queueStats: [
@@ -164,9 +107,9 @@ export const AdminQueuePage = () => {
         },
         { label: 'Completed', value: completedCount, icon: ClipboardList, color: 'text-violet-600', bg: 'bg-violet-50' },
       ],
-      filteredQueues: nextFilteredQueues,
+      queueRows: activeQueueRows,
     };
-  }, [queues, statusFilter, dateScope, specificDate]);
+  }, [queues]);
 
   const openRecordEntry = (queue) => {
     sessionStorage.setItem(
@@ -236,7 +179,7 @@ export const AdminQueuePage = () => {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 rounded-full text-[11px] font-semibold text-slate-600">
             <Users size={14} />
-            <span>{filteredQueues.length} shown</span>
+            <span>{queueRows.length} shown</span>
           </div>
         </div>
       </div>
@@ -256,78 +199,14 @@ export const AdminQueuePage = () => {
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 items-end">
-          <div className="space-y-1">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-              Date View
-            </label>
-            <select
-              value={dateScope}
-              onChange={(e) => setDateScope(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary w-full"
-            >
-              {DATE_SCOPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-              Specific Date
-            </label>
-            <input
-              type="date"
-              value={specificDate}
-              onChange={(e) => {
-                setSpecificDate(e.target.value);
-                if (e.target.value) setDateScope('specific');
-              }}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary w-full"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-              Filter by Status
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary w-full"
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={loadQueues}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-700 hover:bg-slate-50"
-            >
-              <RefreshCw size={12} />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-sm">
         {loading ? (
           <div className="py-10 text-center text-xs text-slate-500 font-semibold">
             Loading queues...
           </div>
-        ) : filteredQueues.length === 0 ? (
+        ) : queueRows.length === 0 ? (
           <div className="py-32 text-center text-xs text-slate-400 font-semibold">
-            No queues found for the selected filters.
+            No active queues found.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -343,7 +222,7 @@ export const AdminQueuePage = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredQueues.map((queue) => {
+                {queueRows.map((queue) => {
                   const patientProfile = resolveQueueReceiptProfile(queue);
                   const receiptIdentity = patientProfile.receiptIdentity;
                   const isExpanded = expandedQueueId === queue.id;
