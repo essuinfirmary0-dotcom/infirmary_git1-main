@@ -161,7 +161,14 @@ export const ClientDashboardPage = () => {
               View All
             </Link>
           </div>
-          <AppointmentList appointments={appointments.slice(0, 2)} isClient={true} user={userProfile} />
+          <AppointmentList
+            appointments={appointments.slice(0, 2)}
+            isClient={true}
+            user={userProfile}
+            variant="list"
+            detailMode="modal"
+            showListHeader={false}
+          />
         </div>
 
         {/* <div className="space-y-6">

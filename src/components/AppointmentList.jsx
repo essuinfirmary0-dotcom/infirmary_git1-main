@@ -192,6 +192,8 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
   const canReschedule = typeof onReschedule === 'function' && isReschedulableAppointment(appointment);
   const canCancel = typeof onCancel === 'function' && isCancellableAppointment(appointment);
   const queueDisplayStatus = getAppointmentQueueDisplayStatus(appointment);
+  const remarksOrMessage = String(appointment?.notes || '').trim();
+  const cancellationReason = String(appointment?.cancellationReason || '').trim();
 
   return (
     <AnimatePresence>
@@ -379,14 +381,26 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
                   </div>
                 )}
 
-                {appointment.notes && (
+                {remarksOrMessage && (
                   <div className="flex items-start gap-4">
                     <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
                       <FileText size={18} />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Additional Notes</p>
-                      <p className="text-sm text-slate-600 italic">"{appointment.notes}"</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Remarks / Message</p>
+                      <p className="text-sm text-slate-600 italic">"{remarksOrMessage}"</p>
+                    </div>
+                  </div>
+                )}
+
+                {cancellationReason && (
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
+                      <Trash2 size={18} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Cancellation / Void Reason</p>
+                      <p className="text-sm text-slate-600 italic">"{cancellationReason}"</p>
                     </div>
                   </div>
                 )}
@@ -567,6 +581,8 @@ export const AppointmentList = ({
   isClient = false,
   user = null,
   variant = 'cards',
+  detailMode = 'panel',
+  showListHeader = true,
 }) => {
   const [selectedAppointmentId, setSelectedAppointmentId] = useState(null);
   const selectedApt = appointments.find((appointment) => appointment.id === selectedAppointmentId) || null;
@@ -588,9 +604,9 @@ export const AppointmentList = ({
   }
 
   if (variant === 'list' && isClient) {
-    return (
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] gap-4 sm:gap-6">
-        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm overflow-hidden min-w-0">
+    const listContent = (
+      <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm overflow-hidden min-w-0">
+        {showListHeader && (
           <div className="px-4 sm:px-6 py-4 border-b border-slate-100 bg-slate-50/80">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -602,79 +618,101 @@ export const AppointmentList = ({
               </span>
             </div>
           </div>
+        )}
 
-          <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] gap-4 px-4 sm:px-6 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-            <span>Appointment Code</span>
-            <span>Service</span>
-            <span>Date</span>
-            <span>Status</span>
-          </div>
+        <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] gap-4 px-4 sm:px-6 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+          <span>Appointment Code</span>
+          <span>Service</span>
+          <span>Date</span>
+          <span>Status</span>
+        </div>
 
-          <div className="max-h-[70vh] overflow-y-auto">
-            {appointments.map((apt) => {
-              const isSelected = selectedAppointmentId === apt.id;
+        <div className="max-h-[70vh] overflow-y-auto">
+          {appointments.map((apt) => {
+            const isSelected = selectedAppointmentId === apt.id;
 
-              return (
-                <button
-                  type="button"
-                  key={apt.id}
-                  aria-pressed={isSelected}
-                  onClick={() => setSelectedAppointmentId((currentId) => (currentId === apt.id ? null : apt.id))}
-                  className={`relative w-full border-b border-slate-100 px-4 py-4 text-left transition-colors last:border-b-0 sm:px-6 ${isSelected ? 'bg-primary/5' : 'hover:bg-slate-50'}`}
-                >
-                  {isSelected && (
-                    <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-primary" aria-hidden="true" />
-                  )}
+            return (
+              <button
+                type="button"
+                key={apt.id}
+                aria-pressed={isSelected}
+                onClick={() => setSelectedAppointmentId((currentId) => (currentId === apt.id ? null : apt.id))}
+                className={`relative w-full border-b border-slate-100 px-4 py-4 text-left transition-colors last:border-b-0 sm:px-6 ${isSelected ? 'bg-primary/5' : 'hover:bg-slate-50'}`}
+              >
+                {isSelected && (
+                  <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-primary" aria-hidden="true" />
+                )}
 
-                  <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] md:items-center md:gap-4">
-                    <div className="min-w-0 pr-4">
+                <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] md:items-center md:gap-4">
+                  <div className="min-w-0 pr-4">
+                    <p className="truncate text-sm font-black text-slate-900">{apt.appointmentCode || 'No code'}</p>
+                  </div>
+                  <p className="truncate text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
+                  <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <StatusBadge status={apt.status} />
+                    <ChevronRight
+                      size={16}
+                      className={`shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3 md:hidden">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Appointment Code</p>
                       <p className="truncate text-sm font-black text-slate-900">{apt.appointmentCode || 'No code'}</p>
                     </div>
-                    <p className="truncate text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
-                    <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
-                    <div className="flex items-center justify-between gap-3">
-                      <StatusBadge status={apt.status} />
-                      <ChevronRight
-                        size={16}
-                        className={`shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
-                      />
-                    </div>
+                    <ChevronRight
+                      size={16}
+                      className={`mt-1 shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
+                    />
                   </div>
 
-                  <div className="space-y-3 md:hidden">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Appointment Code</p>
-                        <p className="truncate text-sm font-black text-slate-900">{apt.appointmentCode || 'No code'}</p>
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        className={`mt-1 shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
-                      />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Service</p>
+                      <p className="text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
                     </div>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Service</p>
-                        <p className="text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Date</p>
-                        <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
-                        <div className="mt-1">
-                          <StatusBadge status={apt.status} />
-                        </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Date</p>
+                      <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                      <div className="mt-1">
+                        <StatusBadge status={apt.status} />
                       </div>
                     </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
+      </div>
+    );
+
+    if (detailMode === 'modal') {
+      return (
+        <>
+          <AppointmentDetailModal
+            isOpen={!!selectedApt}
+            appointment={selectedApt}
+            user={user}
+            onReschedule={onReschedule}
+            onCancel={onCancel}
+            onClose={() => setSelectedAppointmentId(null)}
+          />
+          {listContent}
+        </>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] gap-4 sm:gap-6">
+        {listContent}
 
         <AppointmentDetailPanel
           appointment={selectedApt}

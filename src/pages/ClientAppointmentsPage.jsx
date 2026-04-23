@@ -49,6 +49,8 @@ export const ClientAppointmentsPage = () => {
         onReschedule={handleRescheduleRequest}
         onCancel={handleCancelRequest}
         variant="list"
+        detailMode="modal"
+        showListHeader={false}
       />
     </motion.div>
   );
