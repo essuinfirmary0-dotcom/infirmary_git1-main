@@ -11,6 +11,7 @@ import {
 import { authService } from '../services/authService';
 import { resolveKioskReceiptIdentity } from '../utils/kioskReceiptIdentity';
 import { printKioskReceipt } from '../utils/kioskPrintReceipt';
+import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
 
 function KioskResultBlock({ kioskResult, tone = 'light' }) {
   if (!kioskResult) return null;
@@ -95,7 +96,7 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
                 : ''}
             </p>
             <p className={isDark ? 'text-[11px] text-white/50' : 'text-[11px] text-slate-500'}>
-              Status: {kioskResult.appointment.status}
+              Status: {getAppointmentStatusLabel(kioskResult.appointment.status)}
             </p>
           </div>
         ) : null}
@@ -365,7 +366,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     Status
                   </p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {result.appointment.status}
+                    {getAppointmentStatusLabel(result.appointment.status)}
                   </p>
                 </div>
                 <div className="space-y-0.5 col-span-2">

@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
+import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
 
 const DATE_SCOPE_OPTIONS = [
   { value: 'all', label: 'All Dates' },
@@ -25,9 +26,9 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'all', label: 'All' },
   { value: 'approved', label: 'Approved' },
-  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'confirmed', label: getAppointmentStatusLabel('Confirmed') },
   { value: 'completed', label: 'Completed' },
-  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'cancelled', label: getAppointmentStatusLabel('Cancelled') },
 ];
 
 const toDate = (value) => {
@@ -139,7 +140,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                   </div>
                   {appointment.status && (
                     <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
-                      {appointment.status}
+                      {getAppointmentStatusLabel(appointment.status)}
                     </span>
                   )}
                 </div>
@@ -162,7 +163,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
 
                   <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                    <p className="text-sm font-black text-slate-800">{appointment.status || 'Approved'}</p>
+                    <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved')}</p>
                   </div>
                 </div>
               </div>

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { queueService } from '../../services/queueService';
+import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
 
 export const AdminOverviewPage = () => {
   const { appointments } = useApp();
@@ -36,9 +37,9 @@ export const AdminOverviewPage = () => {
 
   const appointmentStats = [
     { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
-    { label: 'Confirmed', value: appointments.filter((a) => a.status === 'Confirmed').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: getAppointmentStatusLabel('Confirmed'), value: appointments.filter((a) => a.status === 'Confirmed').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Cancelled', value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
+    { label: getAppointmentStatusLabel('Cancelled'), value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
   ];
 
   const queueStats = [

@@ -47,6 +47,7 @@ import {
   startOfYear,
   endOfYear
 } from 'date-fns';
+import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
 
 const safeFormat = (date, formatStr) => {
   if (!date) return 'N/A';
@@ -310,9 +311,9 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
-                { label: 'Confirmed', value: appointments.filter(a => a.status === 'Confirmed').length, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: getAppointmentStatusLabel('Confirmed'), value: appointments.filter(a => a.status === 'Confirmed').length, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Completed', value: appointments.filter(a => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                { label: 'Cancelled', value: appointments.filter(a => a.status === 'Cancelled').length, icon: XCircle, color: 'text-slate-600', bg: 'bg-slate-100' }
+                { label: getAppointmentStatusLabel('Cancelled'), value: appointments.filter(a => a.status === 'Cancelled').length, icon: XCircle, color: 'text-slate-600', bg: 'bg-slate-100' }
               ].map((stat, i) => (
                 <div key={i} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
                   <div className="flex items-center justify-between mb-3">
@@ -517,9 +518,9 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
                   >
                     <option value="All">All Status</option>
                     <option value="Approved">Approved</option>
-                    <option value="Confirmed">Confirmed</option>
+                    <option value="Confirmed">{getAppointmentStatusLabel('Confirmed')}</option>
                     <option value="Completed">Completed</option>
-                    <option value="Cancelled">Cancelled</option>
+                    <option value="Cancelled">{getAppointmentStatusLabel('Cancelled')}</option>
                   </select>
                 </div>
               </div>
@@ -572,9 +573,9 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
                         }`}
                       >
                         <option value="Approved">Approved</option>
-                        <option value="Confirmed">Confirmed</option>
+                        <option value="Confirmed">{getAppointmentStatusLabel('Confirmed')}</option>
                         <option value="Completed">Completed</option>
-                        <option value="Cancelled">Cancelled</option>
+                        <option value="Cancelled">{getAppointmentStatusLabel('Cancelled')}</option>
                       </select>
                     </div>
                   ))}

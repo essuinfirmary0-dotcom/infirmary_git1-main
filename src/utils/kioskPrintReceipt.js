@@ -1,4 +1,5 @@
 import { resolveKioskReceiptIdentity } from './kioskReceiptIdentity';
+import { getAppointmentStatusLabel } from './appointmentStatus';
 
 /** Escape text for HTML body (API-sourced fields). */
 function escapeHtml(s) {
@@ -41,6 +42,7 @@ export function buildKioskReceiptPayload(kioskResult) {
           service: appointment.service || '',
           subcategory: appointment.subcategory || '',
           status: appointment.status || '',
+          statusLabel: getAppointmentStatusLabel(appointment.status || ''),
         }
       : null,
   };
@@ -70,7 +72,7 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
   if (kioskResult.hasAppointmentToday && apt) {
     const code = escapeHtml(apt.code || '');
     const time = escapeHtml(apt.time || '');
-    const status = escapeHtml(apt.status || '');
+    const status = escapeHtml(getAppointmentStatusLabel(apt.status || ''));
     const svc = escapeHtml(
       [apt.service, apt.subcategory].filter(Boolean).join(' - ')
     );

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
+import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
 
 const safeFormat = (date, formatStr) => {
   if (!date) return 'N/A';
@@ -133,7 +134,7 @@ const StatusBadge = ({ status }) => {
   return (
     <span className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${styles[status] || 'bg-slate-50 text-slate-600'}`}>
       {icons[status]}
-      {status}
+      {getAppointmentStatusLabel(status)}
     </span>
   );
 };
@@ -473,7 +474,7 @@ export const AppointmentList = ({
 
             {isClient && apt.status === 'Cancelled' && (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
-                This appointment was cancelled. If you still need this service, please create a new appointment.
+                This appointment was voided. If you still need this service, please create a new appointment.
               </div>
             )}
 

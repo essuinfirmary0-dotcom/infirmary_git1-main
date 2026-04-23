@@ -12,6 +12,7 @@ import {
 import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
 import { AppointmentList } from '../components/AppointmentList';
+import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
 
 export const ClientDashboardPage = () => {
   const { userProfile, appointments, isGuestUser } = useApp();
@@ -22,9 +23,9 @@ export const ClientDashboardPage = () => {
 
   const stats = [
     { label: 'Total Visits', value: appointments.length, icon: CalendarDays, color: 'text-slate-800', bg: 'bg-slate-50' },
-    { label: 'Confirmed', value: appointments.filter((a) => a.status === 'Confirmed').length, icon: PlayCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: getAppointmentStatusLabel('Confirmed'), value: appointments.filter((a) => a.status === 'Confirmed').length, icon: PlayCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Cancelled', value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
+    { label: getAppointmentStatusLabel('Cancelled'), value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
   ];
 
   return (
