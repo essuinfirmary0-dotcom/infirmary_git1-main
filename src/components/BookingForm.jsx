@@ -6,7 +6,7 @@ import { appointmentService } from '../services/appointmentService';
 import { profileService } from '../services/profileService';
 import { departmentService } from '../services/departmentService';
 import 'react-calendar/dist/Calendar.css';
-import { format, isBefore, startOfToday, getDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
+import { format, isBefore, startOfDay, getDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
 import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, X, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -217,12 +217,12 @@ const isInfirmaryClosedOnDate = (d) => {
   return day === 0 || day === 5 || day === 6; // Sunday, Friday, and Saturday
 };
 
-const getNextOpenBookingDate = (baseDate = startOfToday()) => {
-  const nextDate = new Date(baseDate);
-  while (isInfirmaryClosedOnDate(nextDate)) {
-    nextDate.setDate(nextDate.getDate() + 1);
-  }
-  return nextDate;
+const getCurrentSystemDate = (baseDate = new Date()) => startOfDay(baseDate);
+
+const getMillisecondsUntilNextDay = (baseDate = new Date()) => {
+  const nextDay = new Date(baseDate);
+  nextDay.setHours(24, 0, 1, 0);
+  return Math.max(nextDay.getTime() - baseDate.getTime(), 1000);
 };
 
 const parseTimeSlotEndMinutes = (slotLabel) => {
@@ -520,11 +520,11 @@ const initialFormData = (user) => ({
   notes: '',
 });
 
-const parseAppointmentDateValue = (value) => {
-  if (!value) return getNextOpenBookingDate();
-  if (value instanceof Date && isValid(value)) return value;
+const parseAppointmentDateValue = (value, fallbackDate = getCurrentSystemDate()) => {
+  if (!value) return fallbackDate;
+  if (value instanceof Date && isValid(value)) return startOfDay(value);
   const parsed = typeof value === 'string' ? parseISO(value) : new Date(value);
-  return isValid(parsed) ? parsed : getNextOpenBookingDate();
+  return isValid(parsed) ? startOfDay(parsed) : fallbackDate;
 };
 
 const parseClockToMinutes = (value) => {
@@ -607,7 +607,9 @@ export const BookingForm = ({
   rescheduleAppointment = null,
 }) => {
   const navigate = useNavigate();
-  const [date, setDate] = useState(() => getNextOpenBookingDate());
+  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
+  const [date, setDate] = useState(() => getCurrentSystemDate());
+  const [hasUserSelectedDate, setHasUserSelectedDate] = useState(false);
   const [formData, setFormData] = useState(() => initialFormData(user));
   const [requirementFileGroups, setRequirementFileGroups] = useState({
     chestXray: [],
@@ -619,6 +621,49 @@ export const BookingForm = ({
   const submitLockRef = useRef(false);
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
   const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
+  const todayDate = getCurrentSystemDate(currentDateTime);
+  const todayDateKey = format(todayDate, 'yyyy-MM-dd');
+
+  useEffect(() => {
+    const syncCurrentDateTime = () => {
+      setCurrentDateTime(new Date());
+    };
+
+    syncCurrentDateTime();
+
+    const minuteIntervalId = window.setInterval(syncCurrentDateTime, 60 * 1000);
+    let nextDayTimeoutId = null;
+
+    const scheduleNextDayRefresh = () => {
+      nextDayTimeoutId = window.setTimeout(() => {
+        syncCurrentDateTime();
+        scheduleNextDayRefresh();
+      }, getMillisecondsUntilNextDay());
+    };
+
+    scheduleNextDayRefresh();
+
+    return () => {
+      window.clearInterval(minuteIntervalId);
+      if (nextDayTimeoutId) {
+        window.clearTimeout(nextDayTimeoutId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentSystemDate = getCurrentSystemDate();
+
+    setDate((currentSelectedDate) => {
+      const normalizedSelectedDate = parseAppointmentDateValue(currentSelectedDate, currentSystemDate);
+
+      if (!hasUserSelectedDate || isBefore(normalizedSelectedDate, currentSystemDate)) {
+        return currentSystemDate;
+      }
+
+      return normalizedSelectedDate;
+    });
+  }, [todayDateKey, hasUserSelectedDate]);
 
   useEffect(() => {
     let isMounted = true;
@@ -659,7 +704,8 @@ export const BookingForm = ({
       return;
     }
 
-    setDate(parseAppointmentDateValue(rescheduleAppointment.date));
+    setDate(getCurrentSystemDate());
+    setHasUserSelectedDate(false);
     setFormData((prev) => ({
       ...prev,
       patientName: isGuestUser
@@ -768,7 +814,8 @@ export const BookingForm = ({
   const handleConfirmationDone = () => {
     setShowConfirmation(false);
     setLastBooked(null);
-    setDate(getNextOpenBookingDate());
+    setDate(getCurrentSystemDate());
+    setHasUserSelectedDate(false);
     setFormData(initialFormData(user));
     setRequirementFileGroups({
       chestXray: [],
@@ -812,17 +859,32 @@ export const BookingForm = ({
   }, [date]);
 
   const isDayDisabled = ({ date: calendarDate }) => {
-    const isPast = isBefore(calendarDate, startOfToday());
-    const isTooFar = isAfter(calendarDate, addMonths(startOfToday(), 1));
+    const isPast = isBefore(calendarDate, todayDate);
+    const isTooFar = isAfter(calendarDate, addMonths(todayDate, 1));
     return isInfirmaryClosedOnDate(calendarDate) || isPast || isTooFar;
   };
 
+  const getCalendarTileClassName = ({ date: calendarDate, view }) => {
+    if (view !== 'month') {
+      return null;
+    }
+
+    const classNames = [];
+
+    if (isSameDay(calendarDate, todayDate)) {
+      classNames.push('booking-calendar__tile--today');
+    }
+
+    if (isBefore(calendarDate, todayDate)) {
+      classNames.push('booking-calendar__tile--past');
+    }
+
+    return classNames.join(' ') || null;
+  };
+
   const isClosedDate = isInfirmaryClosedOnDate(date);
-  const isSelectedDateToday = isSameDay(date, startOfToday());
-  const currentMinutes = (() => {
-    const now = new Date();
-    return (now.getHours() * 60) + now.getMinutes();
-  })();
+  const isSelectedDateToday = isSameDay(date, todayDate);
+  const currentMinutes = (currentDateTime.getHours() * 60) + currentDateTime.getMinutes();
   const isSlotPastCutoff = (slotTime) => {
     if (!isSelectedDateToday) return false;
     const slotEndMinutes = parseTimeSlotEndMinutes(slotTime);
@@ -1012,12 +1074,21 @@ export const BookingForm = ({
               1. Select Date
             </h2>
             <ReactCalendar
-              onChange={setDate}
+              onChange={(nextValue) => {
+                const nextDate = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+                if (!nextDate || !isValid(nextDate)) {
+                  return;
+                }
+
+                setHasUserSelectedDate(true);
+                setDate(startOfDay(nextDate));
+              }}
               value={date}
               tileDisabled={isDayDisabled}
+              tileClassName={getCalendarTileClassName}
               className="rounded-xl sm:rounded-2xl border-none w-full max-w-full"
-              minDate={startOfToday()}
-              maxDate={addMonths(startOfToday(), 1)}
+              minDate={todayDate}
+              maxDate={addMonths(todayDate, 1)}
             />
             <div className="mt-4 sm:mt-8 p-4 sm:p-6 bg-slate-50 rounded-xl sm:rounded-2xl border border-slate-100">
               <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">

@@ -51,14 +51,29 @@
   font-weight: bold;
 }
 
+.booking-calendar__tile--today {
+  box-shadow: inset 0 0 0 2px #0a6627;
+  font-weight: 800;
+}
+
 .react-calendar__tile--active {
   background: #0a6627 !important;
   color: white !important;
 }
 
+.react-calendar__tile--active.booking-calendar__tile--today {
+  box-shadow: none;
+}
+
 .react-calendar__tile--disabled {
   background-color: #f8fafc;
   color: #cbd5e1;
+}
+
+.booking-calendar__tile--past.react-calendar__tile--disabled {
+  background-color: #f8fafc;
+  color: #cbd5e1;
+  filter: grayscale(0.1);
 }
 
 .react-calendar__month-view__days__day--neighboringMonth {
