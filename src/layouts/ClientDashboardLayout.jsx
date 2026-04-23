@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   CalendarPlus,
   CalendarDays,
+  FolderOpen,
   LogOut,
   Menu,
   X,
@@ -23,10 +24,19 @@ const navItems = [
   { to: '/app/book', end: false, label: 'Book Appointment', icon: CalendarPlus },
   { to: '/app/appointments', end: false, label: 'My Appointments', icon: CalendarDays },
   { to: '/app/profile', end: false, label: 'My Profile', icon: User },
+  { to: '/app/medical-records', end: false, label: 'My Medical Records', icon: FolderOpen },
 ];
 
 const getPageTitle = (pathname) => {
   const segment = pathname.replace('/app', '').replace(/^\//, '') || 'dashboard';
+  const labelMap = {
+    'medical-records': 'My Medical Records',
+  };
+
+  if (labelMap[segment]) {
+    return labelMap[segment];
+  }
+
   return segment.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
 };
 
@@ -109,7 +119,7 @@ export const ClientDashboardLayout = () => {
 
   const userTypeLabel = getUserTypeLabel(userProfile?.userType);
   const visibleNavItems = isGuestUser
-    ? navItems.filter((item) => item.to === '/app/book' || item.to === '/app/appointments')
+    ? navItems.filter((item) => item.to === '/app/book' || item.to === '/app/appointments' || item.to === '/app/medical-records')
     : navItems;
 
   return (

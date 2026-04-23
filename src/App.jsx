@@ -13,6 +13,7 @@ import { ClientDashboardPage } from './pages/ClientDashboardPage';
 import { ClientBookPage } from './pages/ClientBookPage';
 import { ClientAppointmentsPage } from './pages/ClientAppointmentsPage';
 import { ClientProfilePage } from './pages/ClientProfilePage';
+import { ClientMedicalRecordsPage } from './pages/ClientMedicalRecordsPage';
 import { AdminOverviewPage } from './pages/admin/AdminOverviewPage';
 import { AdminAppointmentsPage } from './pages/admin/AdminAppointmentsPage';
 import { AdminRecordsPage } from './pages/admin/AdminRecordsPage';
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="book" element={<ClientBookPage />} />
           <Route path="appointments" element={<ClientAppointmentsPage />} />
           <Route path="profile" element={<ClientProfilePage />} />
+          <Route path="medical-records" element={<ClientMedicalRecordsPage />} />
         </Route>
 
         {/* Admin dashboard: sidebar + Outlet */}

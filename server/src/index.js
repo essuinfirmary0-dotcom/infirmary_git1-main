@@ -682,6 +682,23 @@ function toDatabaseQueueStatus(status) {
   return normalized || 'Waiting';
 }
 
+function resolveMedicalRecordStatus({ appointmentStatus, appointmentCancelledAt, queueStatus }) {
+  const normalizedAppointmentStatus = appointmentStatus
+    ? mapAppointmentStatusFromDatabase(appointmentStatus, appointmentCancelledAt)
+    : '';
+  const normalizedQueueStatus = queueStatus ? mapQueueStatus(queueStatus) : '';
+
+  if (normalizedAppointmentStatus && normalizedAppointmentStatus !== 'Waiting') {
+    return normalizedAppointmentStatus;
+  }
+
+  if (normalizedQueueStatus && normalizedQueueStatus !== 'Waiting') {
+    return normalizedQueueStatus;
+  }
+
+  return 'Saved';
+}
+
 function mapQueueRow(row) {
   const userIdentity = row.user_id
     ? buildResolvedIdentityFields({
@@ -3739,6 +3756,7 @@ app.get('/api/medical-records/patients', loadAuthenticatedUser, async (req, res)
 
 app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (req, res) => {
   const userId = normalizeIdentifier(req.params?.userId);
+  const requesterIsAdmin = isAdminUserType(getEffectiveUserType(req.authUser));
 
   if (!userId) {
     return res.status(400).json({ message: 'User id is required.' });
@@ -3763,6 +3781,15 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
           mr.queue_id,
           mr.record_type,
           mr.purpose,
+          COALESCE(mr.appointment_id, q.appointment_id) AS resolved_appointment_id,
+          q.queue_number,
+          q.status AS queue_status,
+          a.appointment_date,
+          a.time_slot AS appointment_time_slot,
+          a.service AS appointment_service,
+          a.subcategory AS appointment_subcategory,
+          a.status AS appointment_status,
+          a.cancelled_at AS appointment_cancelled_at,
           mra.id AS attachment_id,
           mra.attachment_path AS attachment_item_path,
           mra.attachment_mime AS attachment_item_mime,
@@ -3770,6 +3797,8 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
           mra.original_name AS attachment_item_name,
           mra.created_at AS attachment_item_created_at
         FROM public.medical_records mr
+        LEFT JOIN public.queues q ON q.id = mr.queue_id
+        LEFT JOIN public.appointments a ON a.id = COALESCE(mr.appointment_id, q.appointment_id)
         LEFT JOIN public.medical_record_attachments mra ON mra.record_id = mr.id
         WHERE mr.user_id = $1
         ORDER BY mr.recorded_at DESC, mra.created_at ASC
@@ -3783,16 +3812,26 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
         byRecord.set(row.id, {
           id: row.id,
           userId: row.user_id,
-          recordedBy: row.recorded_by,
+          recordedBy: requesterIsAdmin ? row.recorded_by : null,
           title: row.title,
           notes: row.notes || '',
           recordedAt: row.recorded_at,
           attachmentPath: row.attachment_path || null,
           attachmentMime: row.attachment_mime || null,
-          appointmentId: row.appointment_id || null,
+          appointmentId: row.resolved_appointment_id || row.appointment_id || null,
           queueId: row.queue_id || null,
+          queueNumber: row.queue_number || null,
           recordType: row.record_type || null,
           purpose: row.purpose || null,
+          appointmentDate: row.appointment_date || null,
+          appointmentTime: formatTimeSlotLabel(row.appointment_time_slot),
+          service: row.appointment_service || '',
+          subcategory: row.appointment_subcategory || '',
+          status: resolveMedicalRecordStatus({
+            appointmentStatus: row.appointment_status,
+            appointmentCancelledAt: row.appointment_cancelled_at,
+            queueStatus: row.queue_status,
+          }),
           attachments: [],
         });
       }
@@ -3809,6 +3848,25 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
       }
     });
 
+    const appointmentIds = Array.from(
+      new Set(
+        Array.from(byRecord.values())
+          .map((record) => record.appointmentId)
+          .filter(Boolean),
+      ),
+    );
+
+    const requirementFilesByAppointmentId = new Map(
+      await Promise.all(
+        appointmentIds.map(async (appointmentId) => [
+          appointmentId,
+          await getAppointmentAttachments(appointmentId)
+            .then((attachments) => appendAttachmentUrls(attachments))
+            .catch(() => []),
+        ]),
+      ),
+    );
+
     const records = await Promise.all(
       Array.from(byRecord.values()).map(async (record) => {
         const attachments = await appendAttachmentUrls(record.attachments || []);
@@ -3823,11 +3881,14 @@ app.get('/api/medical-records/:userId/records', loadAuthenticatedUser, async (re
           ...record,
           attachmentUrl: primaryAttachment.attachmentUrl || null,
           attachments,
+          requirementFiles: requirementFilesByAppointmentId.get(record.appointmentId) || [],
         };
       }),
     );
 
-    return res.json(records);
+    return res.json(
+      records.filter((record) => !['Cancelled', 'Not Completed', 'Skipped'].includes(record.status)),
+    );
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load medical records.', error: error.message });
   }
