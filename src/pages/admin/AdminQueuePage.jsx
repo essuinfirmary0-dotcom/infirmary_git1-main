@@ -477,7 +477,7 @@ export const AdminQueuePage = () => {
                       }}
                       className="flex-1 py-2.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/10 transition-all disabled:opacity-60"
                     >
-                      {q.status === 'Serving' ? 'Record Service Result' : 'Serve Patient'}
+                      Serve Patient
                     </button>
                     <button
                       type="button"
@@ -593,7 +593,7 @@ export const AdminQueuePage = () => {
                           }}
                           className="px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 text-primary text-[11px] font-black hover:bg-primary/10 transition-all disabled:opacity-60"
                         >
-                          {q.status === 'Serving' ? 'Record Result' : 'Serve Patient'}
+                          Serve Patient
                         </button>
                         <button
                           type="button"
