@@ -82,9 +82,8 @@ export const ClientDashboardPage = () => {
       color: queueVisibilityTone.color,
       bg: queueVisibilityTone.bg,
       valueClassName: queueVisibilityStatus ? 'text-base sm:text-2xl leading-tight' : 'text-sm sm:text-xl leading-tight',
-      helperText: queueVisibilityStatus
-        ? 'Based on your actual queue position.'
-        : 'Check in first to appear in the active queue.',
+      cornerLabel: 'Queue Status',
+      hideLabel: true,
     },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: getAppointmentStatusLabel('Cancelled'), value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
@@ -132,9 +131,13 @@ export const ClientDashboardPage = () => {
               <div className={`p-2 sm:p-3 ${stat.bg} ${stat.color} rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform`}>
                 <stat.icon className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Stats</span>
+              <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                {stat.cornerLabel || 'Stats'}
+              </span>
             </div>
-            <p className="text-xs sm:text-sm font-bold text-slate-500 mb-0.5 sm:mb-1 truncate">{stat.label}</p>
+            {!stat.hideLabel && (
+              <p className="text-xs sm:text-sm font-bold text-slate-500 mb-0.5 sm:mb-1 truncate">{stat.label}</p>
+            )}
             <h3 className={`${stat.valueClassName || 'text-xl sm:text-3xl'} font-black ${stat.color}`}>{stat.value}</h3>
             {stat.helperText && (
               <p className="mt-1 text-[11px] sm:text-xs font-medium leading-snug text-slate-400">
