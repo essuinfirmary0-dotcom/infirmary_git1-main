@@ -17,7 +17,6 @@ import { useApp } from '../context/AppContext';
 import { medicalRecordService } from '../services/medicalRecordService';
 import { baseURL } from '../services/api';
 
-const CERTIFICATE_PATTERN = /certificate|certification/i;
 const METADATA_LINE_PATTERN = /^(?:Queue Number|Service|Requested Purpose|Appointment Code|Appointment Date|Appointment Time|Patient Notes):/i;
 const BP_LINE_PATTERN = /^Blood Pressure:\s*(.+)$/i;
 const HARDCOPY_LINE_PATTERN = /^Hardcopy verification:\s*(.+)$/i;
@@ -46,13 +45,6 @@ function getStatusTone(status) {
   }
 
   return 'bg-slate-100 text-slate-700 border-slate-200';
-}
-
-function isCertificateRecord(record) {
-  const source = [record?.recordType, record?.title, record?.service, record?.subcategory]
-    .filter(Boolean)
-    .join(' ');
-  return CERTIFICATE_PATTERN.test(source);
 }
 
 function getAttachmentIdentity(attachment) {
@@ -278,13 +270,6 @@ export const ClientMedicalRecordsPage = () => {
         bg: 'bg-slate-100',
       },
       {
-        label: 'Certificate Records',
-        value: records.filter((record) => isCertificateRecord(record)).length,
-        icon: ShieldCheck,
-        tone: 'text-emerald-700',
-        bg: 'bg-emerald-50',
-      },
-      {
         label: 'With Attachments',
         value: records.filter((record) => normalizeRecordAttachments(record).length > 0).length,
         icon: ClipboardList,
@@ -330,7 +315,7 @@ export const ClientMedicalRecordsPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
         {stats.map((stat) => (
           <div key={stat.label} className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm">
             <div className="flex items-center justify-between mb-3">
