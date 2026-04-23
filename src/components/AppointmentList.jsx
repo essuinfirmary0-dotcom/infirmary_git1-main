@@ -3,6 +3,7 @@ import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw,
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
 import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
+import { QUEUE_DISPLAY_STATUSES } from '../utils/queueStatus';
 
 const safeFormat = (date, formatStr) => {
   if (!date) return 'N/A';
@@ -143,6 +144,44 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+const QUEUE_STATUS_STYLES = {
+  [QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING]: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  [QUEUE_DISPLAY_STATUSES.UP_NEXT]: 'border-amber-200 bg-amber-50 text-amber-700',
+  [QUEUE_DISPLAY_STATUSES.IN_LINE]: 'border-blue-200 bg-blue-50 text-blue-700',
+};
+
+const getAppointmentQueueDisplayStatus = (appointment) => {
+  const explicitDisplayStatus = String(appointment?.queueDisplayStatus || '').trim();
+  if (explicitDisplayStatus) {
+    return explicitDisplayStatus;
+  }
+
+  const fallbackQueueStatus = String(appointment?.queueStatus || '').trim();
+  if (fallbackQueueStatus === 'Serving') {
+    return QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING;
+  }
+
+  if (fallbackQueueStatus === 'Waiting') {
+    return QUEUE_DISPLAY_STATUSES.IN_LINE;
+  }
+
+  return '';
+};
+
+const QueueStatusBadge = ({ status, className = '' }) => {
+  if (!status) {
+    return null;
+  }
+
+  const toneClass = QUEUE_STATUS_STYLES[status] || 'border-slate-200 bg-slate-50 text-slate-700';
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-black ${toneClass} ${className}`.trim()}>
+      {status}
+    </span>
+  );
+};
+
 const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedule, onCancel }) => {
   if (!appointment) return null;
   const isGuestUser = user?.userType === 'guest';
@@ -152,6 +191,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
   const showProgram = !isGuestUser && Boolean(user?.program?.trim());
   const canReschedule = typeof onReschedule === 'function' && isReschedulableAppointment(appointment);
   const canCancel = typeof onCancel === 'function' && isCancellableAppointment(appointment);
+  const queueDisplayStatus = getAppointmentQueueDisplayStatus(appointment);
 
   return (
     <AnimatePresence>
@@ -178,7 +218,10 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
                   </div>
                   <div>
                     <h2 className="text-2xl font-bold text-slate-800">Appointment Details</h2>
-                    <StatusBadge status={appointment.status} />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <StatusBadge status={appointment.status} />
+                      <QueueStatusBadge status={queueDisplayStatus} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -195,14 +238,26 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
                     <p className="text-2xl font-black text-slate-800 tracking-tight">{appointment.appointmentCode}</p>
                   </div>
                 </div>
-                {appointment.queueNumber && (
+                {(appointment.queueNumber || queueDisplayStatus) && (
                   <div className="ml-4 text-right">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Queue Number
-                    </p>
-                    <p className="text-lg font-black text-slate-900">
-                      {appointment.queueNumber}
-                    </p>
+                    {appointment.queueNumber && (
+                      <>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Queue Number
+                        </p>
+                        <p className="text-lg font-black text-slate-900">
+                          {appointment.queueNumber}
+                        </p>
+                      </>
+                    )}
+                    {queueDisplayStatus && (
+                      <div className="mt-2">
+                        <p className="mb-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Queue Status
+                        </p>
+                        <QueueStatusBadge status={queueDisplayStatus} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -414,6 +469,7 @@ export const AppointmentList = ({
         {appointments.map((apt) => {
           const canReschedule = isClient && typeof onReschedule === 'function' && isReschedulableAppointment(apt);
           const canCancel = isClient && typeof onCancel === 'function' && isCancellableAppointment(apt);
+          const queueDisplayStatus = isClient ? getAppointmentQueueDisplayStatus(apt) : '';
           return (
           <div 
             key={apt.id} 
@@ -462,6 +518,29 @@ export const AppointmentList = ({
                 {apt.service} - {apt.subcategory}
               </div>
             </div>
+
+            {isClient && queueDisplayStatus && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      Queue Status
+                    </p>
+                    <div className="mt-2">
+                      <QueueStatusBadge status={queueDisplayStatus} className="text-[11px]" />
+                    </div>
+                  </div>
+                  {apt.queueNumber && (
+                    <div className="text-right">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        Queue Number
+                      </p>
+                      <p className="text-sm font-black text-slate-900">{apt.queueNumber}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {apt.purpose && (
               <div className="mt-4 p-3 bg-slate-50 rounded-lg text-sm text-slate-600 border border-slate-100">

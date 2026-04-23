@@ -691,6 +691,74 @@ function toDatabaseQueueStatus(status) {
   return normalized || 'Waiting';
 }
 
+const QUEUE_DISPLAY_STATUSES = Object.freeze({
+  CURRENTLY_SERVING: 'Currently Serving',
+  UP_NEXT: 'Up Next',
+  IN_LINE: 'In Line',
+});
+
+function parseQueueSortDateValue(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function compareQueueRowsByCheckInOrder(a, b) {
+  const dateA = parseQueueSortDateValue(a?.checked_in_at || a?.created_at);
+  const dateB = parseQueueSortDateValue(b?.checked_in_at || b?.created_at);
+
+  if (dateA && dateB) {
+    const comparison = dateA.getTime() - dateB.getTime();
+    if (comparison !== 0) {
+      return comparison;
+    }
+  } else if (dateA) {
+    return -1;
+  } else if (dateB) {
+    return 1;
+  }
+
+  return String(a?.queue_number || '').localeCompare(String(b?.queue_number || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function buildQueueDisplayStatusMap(rows = []) {
+  const activeRows = rows
+    .filter((row) => Boolean(row?.checked_in_at))
+    .filter((row) => !['Cancelled', 'Done'].includes(String(row?.status || '').trim()))
+    .sort(compareQueueRowsByCheckInOrder);
+
+  const currentServingRow =
+    activeRows.find((row) => String(row?.status || '').trim() === 'Serving') || null;
+
+  const orderedRows = currentServingRow
+    ? [currentServingRow, ...activeRows.filter((row) => row.id !== currentServingRow.id)]
+    : activeRows;
+
+  const statusByQueueId = new Map();
+  let upNextAssigned = false;
+
+  orderedRows.forEach((row) => {
+    let displayStatus = QUEUE_DISPLAY_STATUSES.IN_LINE;
+
+    if (currentServingRow && row.id === currentServingRow.id) {
+      displayStatus = QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING;
+    } else if (currentServingRow && !upNextAssigned) {
+      displayStatus = QUEUE_DISPLAY_STATUSES.UP_NEXT;
+      upNextAssigned = true;
+    }
+
+    statusByQueueId.set(row.id, displayStatus);
+  });
+
+  return statusByQueueId;
+}
+
 function resolveMedicalRecordStatus({ appointmentStatus, appointmentCancelledAt, queueStatus }) {
   const normalizedAppointmentStatus = appointmentStatus
     ? mapAppointmentStatusFromDatabase(appointmentStatus, appointmentCancelledAt)
@@ -4496,53 +4564,87 @@ app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
 });
 
 app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayInManila();
 
   try {
-    const { rows } = await pool.query(
-      `
-        SELECT
-          q.id,
-          q.user_id,
-          q.queue_number,
-          q.appointment_id,
-          q.created_at,
-          q.checked_in_at,
-          q.status,
-          u.firstname AS user_firstname,
-          u.middle_initial AS user_middle_initial,
-          u.lastname AS user_lastname,
-          u.email AS user_email,
-          u.student_number AS user_student_number,
-          u.employee_number AS user_employee_number,
-          u.id_number AS user_id_number,
-          u.college AS user_college,
-          u.program AS user_program,
-          u.user_type AS user_user_type,
-          u.role AS user_role,
-          a.appointment_code,
-          a.patient_name,
-          a.appointment_date,
-          a.time_slot AS appointment_time,
-          a.service AS appointment_service,
-          a.subcategory AS appointment_subcategory,
-          a.purpose AS appointment_purpose,
-          a.notes AS appointment_notes,
-          a.status AS appointment_status,
-          a.cancelled_at AS appointment_cancelled_at
-        FROM public.queues q
-        LEFT JOIN public.users_auth u ON u.id = q.user_id
-        LEFT JOIN public.appointments a ON a.id = q.appointment_id
-        WHERE q.user_id = $1
-          AND q.checked_in_at IS NOT NULL
-          AND q.status <> 'Cancelled'
-          AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $2
-        ORDER BY q.checked_in_at ASC, q.created_at ASC, q.queue_number ASC
-      `,
-      [req.authUser.id, today],
-    );
+    const [userQueuesResult, activeQueuesResult] = await Promise.all([
+      pool.query(
+        `
+          SELECT
+            q.id,
+            q.user_id,
+            q.queue_number,
+            q.appointment_id,
+            q.created_at,
+            q.checked_in_at,
+            q.status,
+            u.firstname AS user_firstname,
+            u.middle_initial AS user_middle_initial,
+            u.lastname AS user_lastname,
+            u.email AS user_email,
+            u.student_number AS user_student_number,
+            u.employee_number AS user_employee_number,
+            u.id_number AS user_id_number,
+            u.college AS user_college,
+            u.program AS user_program,
+            u.user_type AS user_user_type,
+            u.role AS user_role,
+            a.appointment_code,
+            a.patient_name,
+            a.appointment_date,
+            a.time_slot AS appointment_time,
+            a.service AS appointment_service,
+            a.subcategory AS appointment_subcategory,
+            a.purpose AS appointment_purpose,
+            a.notes AS appointment_notes,
+            a.status AS appointment_status,
+            a.cancelled_at AS appointment_cancelled_at
+          FROM public.queues q
+          LEFT JOIN public.users_auth u ON u.id = q.user_id
+          LEFT JOIN public.appointments a ON a.id = q.appointment_id
+          WHERE q.user_id = $1
+            AND q.checked_in_at IS NOT NULL
+            AND q.status <> 'Cancelled'
+            AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $2
+          ORDER BY q.checked_in_at ASC, q.created_at ASC, q.queue_number ASC
+        `,
+        [req.authUser.id, today],
+      ),
+      pool.query(
+        `
+          SELECT
+            q.id,
+            q.queue_number,
+            q.created_at,
+            q.checked_in_at,
+            q.status
+          FROM public.queues q
+          LEFT JOIN public.appointments a ON a.id = q.appointment_id
+          WHERE q.checked_in_at IS NOT NULL
+            AND q.status IN ('Waiting', 'Serving')
+            AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $1
+          ORDER BY q.checked_in_at ASC NULLS LAST, q.created_at ASC, q.queue_number ASC
+        `,
+        [today],
+      ),
+    ]);
 
-    return res.json(rows.map(mapQueueRow));
+    const displayStatusByQueueId = buildQueueDisplayStatusMap(activeQueuesResult.rows);
+
+    return res.json(
+      userQueuesResult.rows.map((row) => {
+        const mappedQueue = mapQueueRow(row);
+        const displayStatus = displayStatusByQueueId.get(row.id) || null;
+
+        return {
+          ...mappedQueue,
+          displayStatus,
+          isCurrentServing: displayStatus === QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING,
+          isUpNext: displayStatus === QUEUE_DISPLAY_STATUSES.UP_NEXT,
+          isInLine: displayStatus === QUEUE_DISPLAY_STATUSES.IN_LINE,
+        };
+      }),
+    );
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load your queue entries.', error: error.message });
   }

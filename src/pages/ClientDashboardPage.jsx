@@ -91,7 +91,7 @@ export const ClientDashboardPage = () => {
               View All
             </Link>
           </div>
-          <AppointmentList appointments={appointments.slice(0, 2)} isClient={true} />
+          <AppointmentList appointments={appointments.slice(0, 2)} isClient={true} user={userProfile} />
         </div>
 
         {/* <div className="space-y-6">

@@ -188,13 +188,28 @@ export const AppProvider = ({ children }) => {
         });
         const enriched = (data || []).map((apt) => {
           const q = queuesByApt.get(apt.id);
-          return q
+          const queueFields = q
             ? {
-                ...apt,
                 queueNumber: q.queueNumber,
                 queueStatus: q.status,
+                queueDisplayStatus: q.displayStatus || null,
+                isCurrentServing: Boolean(q.isCurrentServing),
+                isUpNext: Boolean(q.isUpNext),
+                isInLine: Boolean(q.isInLine),
               }
-            : apt;
+            : {
+                queueNumber: null,
+                queueStatus: null,
+                queueDisplayStatus: null,
+                isCurrentServing: false,
+                isUpNext: false,
+                isInLine: false,
+              };
+
+          return {
+            ...apt,
+            ...queueFields,
+          };
         });
         setAppointments(enriched);
       }
@@ -313,6 +328,10 @@ export const AppProvider = ({ children }) => {
               ...appointment,
               queueNumber: null,
               queueStatus: null,
+              queueDisplayStatus: null,
+              isCurrentServing: false,
+              isUpNext: false,
+              isInLine: false,
             }
           : existingAppointment,
       ),
@@ -331,6 +350,10 @@ export const AppProvider = ({ children }) => {
                 ...appointment,
                 queueNumber: null,
                 queueStatus: null,
+                queueDisplayStatus: null,
+                isCurrentServing: false,
+                isUpNext: false,
+                isInLine: false,
               }
             : a,
         ),
