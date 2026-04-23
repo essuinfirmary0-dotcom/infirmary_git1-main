@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
 import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
@@ -434,6 +434,131 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
   );
 };
 
+const AppointmentDetailField = ({ label, value, fullWidth = false }) => (
+  <div className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${fullWidth ? 'sm:col-span-2' : ''}`}>
+    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">{label}</p>
+    <p className="mt-1 text-sm font-bold text-slate-900 whitespace-pre-wrap">{value || 'Not provided'}</p>
+  </div>
+);
+
+const AppointmentDetailPanel = ({ appointment, user, onReschedule, onCancel, onClearSelection }) => {
+  if (!appointment) {
+    return (
+      <div className="bg-white rounded-2xl sm:rounded-3xl border border-dashed border-slate-300 p-6 sm:p-8 text-center min-h-[320px] flex flex-col items-center justify-center">
+        <div className="p-3 rounded-2xl bg-slate-50 text-slate-400 mb-4">
+          <ClipboardList size={28} />
+        </div>
+        <h3 className="text-lg font-black text-slate-800">Select an appointment</h3>
+        <p className="mt-2 max-w-sm text-sm text-slate-500">
+          Click any appointment from the list to view the full details, remarks, queue status, and available actions.
+        </p>
+      </div>
+    );
+  }
+
+  const isGuestUser = user?.userType === 'guest';
+  const queueDisplayStatus = getAppointmentQueueDisplayStatus(appointment);
+  const canReschedule = typeof onReschedule === 'function' && isReschedulableAppointment(appointment);
+  const canCancel = typeof onCancel === 'function' && isCancellableAppointment(appointment);
+  const serviceLabel = appointment.subcategory
+    ? `${appointment.service} - ${appointment.subcategory}`
+    : appointment.service || 'No service recorded';
+  const guestType = user?.program?.trim() || '';
+  const showCollege = !isGuestUser && Boolean(user?.college?.trim());
+  const showProgram = !isGuestUser && Boolean(user?.program?.trim());
+  const remarksOrMessage = String(appointment.notes || '').trim();
+  const cancellationReason = String(appointment.cancellationReason || '').trim();
+
+  return (
+    <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm p-4 sm:p-6 md:p-8 xl:sticky xl:top-4">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+              <ServiceIcon service={appointment.service} />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-primary uppercase tracking-[0.22em]">Selected Appointment</p>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                {appointment.appointmentCode || 'Appointment Details'}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">{serviceLabel}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClearSelection}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600 transition-colors hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={appointment.status} />
+          <QueueStatusBadge status={queueDisplayStatus} />
+          {appointment.queueNumber && (
+            <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+              Queue: {appointment.queueNumber}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <AppointmentDetailField label="Appointment Code" value={appointment.appointmentCode} />
+        <AppointmentDetailField label="Patient Name" value={appointment.patientName} />
+        <AppointmentDetailField label="Date" value={safeFormat(appointment.date, 'MMMM d, yyyy')} />
+        <AppointmentDetailField label="Time" value={appointment.time} />
+        <AppointmentDetailField label="Service" value={serviceLabel} />
+        <AppointmentDetailField label="Purpose" value={appointment.purpose} />
+        <AppointmentDetailField label="Status" value={getAppointmentStatusLabel(appointment.status)} />
+        {queueDisplayStatus && (
+          <AppointmentDetailField label="Queue Status" value={queueDisplayStatus} />
+        )}
+        {showCollege && (
+          <AppointmentDetailField label="College" value={user.college} />
+        )}
+        {showProgram && (
+          <AppointmentDetailField label="Department / Program" value={user.program} />
+        )}
+        {isGuestUser && (
+          <AppointmentDetailField label="Type of Guest" value={guestType || 'Not provided'} />
+        )}
+        {remarksOrMessage && (
+          <AppointmentDetailField label="Remarks / Message" value={remarksOrMessage} fullWidth />
+        )}
+        {cancellationReason && (
+          <AppointmentDetailField label="Cancellation / Void Reason" value={cancellationReason} fullWidth />
+        )}
+      </div>
+
+      {(canReschedule || canCancel) && (
+        <div className="mt-6 flex flex-wrap gap-3 border-t border-slate-100 pt-5">
+          {canReschedule && (
+            <button
+              type="button"
+              onClick={() => onReschedule(appointment)}
+              className="flex-1 min-w-[180px] rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              Reschedule Appointment
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              onClick={() => onCancel(appointment)}
+              className="flex-1 min-w-[180px] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-600 transition-colors hover:bg-red-100"
+            >
+              Cancel Appointment
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const AppointmentList = ({
   appointments,
   onCancel,
@@ -441,8 +566,16 @@ export const AppointmentList = ({
   onReschedule,
   isClient = false,
   user = null,
+  variant = 'cards',
 }) => {
-  const [selectedApt, setSelectedApt] = useState(null);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState(null);
+  const selectedApt = appointments.find((appointment) => appointment.id === selectedAppointmentId) || null;
+
+  useEffect(() => {
+    if (selectedAppointmentId && !appointments.some((appointment) => appointment.id === selectedAppointmentId)) {
+      setSelectedAppointmentId(null);
+    }
+  }, [appointments, selectedAppointmentId]);
 
   if (appointments.length === 0) {
     return (
@@ -450,6 +583,106 @@ export const AppointmentList = ({
         <Calendar size={48} className="mx-auto text-slate-300 mb-4" />
         <h3 className="text-lg font-medium text-slate-600">No appointments found</h3>
         <p className="text-slate-400">Your scheduled visits will appear here.</p>
+      </div>
+    );
+  }
+
+  if (variant === 'list' && isClient) {
+    return (
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] gap-4 sm:gap-6">
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm overflow-hidden min-w-0">
+          <div className="px-4 sm:px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900">Appointment List</h3>
+                <p className="text-xs sm:text-sm text-slate-500">Click an appointment to view its full details.</p>
+              </div>
+              <span className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-[0.2em]">
+                {appointments.length} Appointment{appointments.length === 1 ? '' : 's'}
+              </span>
+            </div>
+          </div>
+
+          <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] gap-4 px-4 sm:px-6 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+            <span>Appointment Code</span>
+            <span>Service</span>
+            <span>Date</span>
+            <span>Status</span>
+          </div>
+
+          <div className="max-h-[70vh] overflow-y-auto">
+            {appointments.map((apt) => {
+              const isSelected = selectedAppointmentId === apt.id;
+
+              return (
+                <button
+                  type="button"
+                  key={apt.id}
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedAppointmentId((currentId) => (currentId === apt.id ? null : apt.id))}
+                  className={`relative w-full border-b border-slate-100 px-4 py-4 text-left transition-colors last:border-b-0 sm:px-6 ${isSelected ? 'bg-primary/5' : 'hover:bg-slate-50'}`}
+                >
+                  {isSelected && (
+                    <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-primary" aria-hidden="true" />
+                  )}
+
+                  <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_160px] md:items-center md:gap-4">
+                    <div className="min-w-0 pr-4">
+                      <p className="truncate text-sm font-black text-slate-900">{apt.appointmentCode || 'No code'}</p>
+                    </div>
+                    <p className="truncate text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
+                    <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <StatusBadge status={apt.status} />
+                      <ChevronRight
+                        size={16}
+                        className={`shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 md:hidden">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Appointment Code</p>
+                        <p className="truncate text-sm font-black text-slate-900">{apt.appointmentCode || 'No code'}</p>
+                      </div>
+                      <ChevronRight
+                        size={16}
+                        className={`mt-1 shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Service</p>
+                        <p className="text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Date</p>
+                        <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                        <div className="mt-1">
+                          <StatusBadge status={apt.status} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <AppointmentDetailPanel
+          appointment={selectedApt}
+          user={user}
+          onReschedule={onReschedule}
+          onCancel={onCancel}
+          onClearSelection={() => setSelectedAppointmentId(null)}
+        />
       </div>
     );
   }
@@ -462,7 +695,7 @@ export const AppointmentList = ({
         user={user}
         onReschedule={isClient ? onReschedule : undefined}
         onCancel={isClient ? onCancel : undefined}
-        onClose={() => setSelectedApt(null)} 
+        onClose={() => setSelectedAppointmentId(null)} 
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
@@ -473,7 +706,7 @@ export const AppointmentList = ({
           return (
           <div 
             key={apt.id} 
-            onClick={() => setSelectedApt(apt)}
+            onClick={() => setSelectedAppointmentId(apt.id)}
             className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all relative group cursor-pointer hover:border-primary/20 min-w-0"
           >
               <div className="flex justify-between items-start mb-4">
