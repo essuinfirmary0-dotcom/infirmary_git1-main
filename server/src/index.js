@@ -408,9 +408,14 @@ function mapManagedUserRow(user) {
 }
 
 const DEFAULT_TIME_SLOTS = [
-  { timeSlot: '8:00 AM - 11:00 AM', maxCapacity: 50, sortOrder: 0 },
-  { timeSlot: '11:00 AM - 1:00 PM', maxCapacity: 50, sortOrder: 1 },
-  { timeSlot: '1:00 PM - 4:00 PM', maxCapacity: 50, sortOrder: 2 },
+  { timeSlot: '8:00 AM - 9:00 AM', maxCapacity: 13, sortOrder: 0 },
+  { timeSlot: '9:00 AM - 10:00 AM', maxCapacity: 13, sortOrder: 1 },
+  { timeSlot: '10:00 AM - 11:00 AM', maxCapacity: 13, sortOrder: 2 },
+  { timeSlot: '11:00 AM - 12:00 PM', maxCapacity: 11, sortOrder: 3 },
+  { timeSlot: '1:00 PM - 2:00 PM', maxCapacity: 13, sortOrder: 4 },
+  { timeSlot: '2:00 PM - 3:00 PM', maxCapacity: 13, sortOrder: 5 },
+  { timeSlot: '3:00 PM - 4:00 PM', maxCapacity: 13, sortOrder: 6 },
+  { timeSlot: '4:00 PM - 5:00 PM', maxCapacity: 11, sortOrder: 7 },
 ];
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
@@ -1882,8 +1887,8 @@ async function getOrCreateSlotDefinition(timeSlot) {
     `,
     [
       normalizedTimeSlot,
-      fallback?.maxCapacity || 50,
-      fallback?.sortOrder || 0,
+      fallback?.maxCapacity ?? DEFAULT_TIME_SLOTS[0]?.maxCapacity ?? 13,
+      fallback?.sortOrder ?? 0,
     ],
   );
 

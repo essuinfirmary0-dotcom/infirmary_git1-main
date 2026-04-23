@@ -157,13 +157,46 @@ const buildStudentAcademicOptions = (departments = []) => {
   };
 };
 
-const MAX_SLOTS = 50;
-const DEFAULT_TIME_SLOTS = [
-  '8:00 AM - 11:00 AM',
-  '11:00 AM - 1:00 PM',
-  '1:00 PM - 4:00 PM',
+const DEFAULT_TIME_SLOT_OPTIONS = [
+  { time: '8:00 AM - 9:00 AM', maxCapacity: 13, session: 'morning' },
+  { time: '9:00 AM - 10:00 AM', maxCapacity: 13, session: 'morning' },
+  { time: '10:00 AM - 11:00 AM', maxCapacity: 13, session: 'morning' },
+  { time: '11:00 AM - 12:00 PM', maxCapacity: 11, session: 'morning' },
+  { time: '1:00 PM - 2:00 PM', maxCapacity: 13, session: 'afternoon' },
+  { time: '2:00 PM - 3:00 PM', maxCapacity: 13, session: 'afternoon' },
+  { time: '3:00 PM - 4:00 PM', maxCapacity: 13, session: 'afternoon' },
+  { time: '4:00 PM - 5:00 PM', maxCapacity: 11, session: 'afternoon' },
+];
+const TIME_SLOT_SECTIONS = [
+  { key: 'morning', label: 'Morning Session', totalCapacity: 50 },
+  { key: 'afternoon', label: 'Afternoon Session', totalCapacity: 50 },
 ];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
+
+const createDefaultSlotAvailability = () =>
+  DEFAULT_TIME_SLOT_OPTIONS.map((slot) => ({
+    time: slot.time,
+    remaining: slot.maxCapacity,
+    maxCapacity: slot.maxCapacity,
+    session: slot.session,
+  }));
+
+const mapApiSlotsToAvailability = (slots = []) => {
+  const slotsByTime = new Map(
+    (slots || []).map((slot) => [slot.timeSlot || slot.time, slot]),
+  );
+
+  return DEFAULT_TIME_SLOT_OPTIONS.map((slot) => {
+    const apiSlot = slotsByTime.get(slot.time);
+
+    return {
+      time: slot.time,
+      remaining: apiSlot?.remaining ?? slot.maxCapacity,
+      maxCapacity: apiSlot?.maxCapacity ?? slot.maxCapacity,
+      session: slot.session,
+    };
+  });
+};
 
 const getAvailableSubcategoryOptions = (service) =>
   SUBCATEGORY_OPTIONS_BY_SERVICE[service] || [];
@@ -756,7 +789,7 @@ export const BookingForm = ({
 
   // Fetch all slot availabilities for the selected date from API (single request)
   const [slotAvailability, setSlotAvailability] = useState(
-    DEFAULT_TIME_SLOTS.map((t) => ({ time: t, remaining: MAX_SLOTS, maxCapacity: MAX_SLOTS }))
+    createDefaultSlotAvailability(),
   );
   const [slotsLoading, setSlotsLoading] = useState(false);
   const loadSlotAvailability = async (selectedDate) => {
@@ -767,17 +800,11 @@ export const BookingForm = ({
       const slots = res?.slots ?? [];
       setSlotAvailability(
         slots.length
-          ? slots.map((s) => ({
-            time: s.timeSlot,
-            remaining: s.remaining ?? 0,
-            maxCapacity: s.maxCapacity ?? MAX_SLOTS,
-          }))
-          : DEFAULT_TIME_SLOTS.map((t) => ({ time: t, remaining: MAX_SLOTS, maxCapacity: MAX_SLOTS }))
+          ? mapApiSlotsToAvailability(slots)
+          : createDefaultSlotAvailability(),
       );
     } catch {
-      setSlotAvailability(
-        DEFAULT_TIME_SLOTS.map((t) => ({ time: t, remaining: MAX_SLOTS, maxCapacity: MAX_SLOTS }))
-      );
+      setSlotAvailability(createDefaultSlotAvailability());
     } finally {
       setSlotsLoading(false);
     }
@@ -811,6 +838,10 @@ export const BookingForm = ({
     const isFull = slot ? slot.remaining <= 0 : false;
     return isFull || isSlotPastCutoff(slotTime);
   };
+  const groupedSlotAvailability = TIME_SLOT_SECTIONS.map((section) => ({
+    ...section,
+    slots: slotAvailability.filter((slot) => slot.session === section.key),
+  }));
 
   useEffect(() => {
     if (!formData.timeSlot) return;
@@ -1002,49 +1033,68 @@ export const BookingForm = ({
                   Infirmary is closed on Friday and weekends.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {slotsLoading ? (
-                    Array.from({ length: DEFAULT_TIME_SLOTS.length }).map((_, idx) => (
-                      <div
-                        key={idx}
-                        className="p-4 rounded-2xl border border-slate-200 bg-slate-50 animate-pulse flex justify-between items-center"
-                      >
-                        <div className="h-4 w-32 bg-slate-200 rounded-full" />
-                        <div className="h-6 w-24 bg-slate-200 rounded-full" />
+                <div className="space-y-5">
+                  {TIME_SLOT_SECTIONS.map((section) => {
+                    const sectionSlots = groupedSlotAvailability.find((group) => group.key === section.key)?.slots || [];
+                    const sectionSlotDefinitions = DEFAULT_TIME_SLOT_OPTIONS.filter((slot) => slot.session === section.key);
+
+                    return (
+                      <div key={section.key} className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                            {section.label}
+                          </p>
+                          <span className="text-[11px] font-bold text-slate-500">
+                            {section.totalCapacity} total slots
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4">
+                          {slotsLoading ? (
+                            sectionSlotDefinitions.map((slot) => (
+                              <div
+                                key={`${section.key}-${slot.time}`}
+                                className="p-4 rounded-2xl border border-slate-200 bg-slate-50 animate-pulse flex justify-between items-center"
+                              >
+                                <div className="h-4 w-40 bg-slate-200 rounded-full" />
+                                <div className="h-6 w-28 bg-slate-200 rounded-full" />
+                              </div>
+                            ))
+                          ) : (
+                            sectionSlots.map((slot) => {
+                              const isPastCutoff = isSlotPastCutoff(slot.time);
+                              const isUnavailable = slot.remaining <= 0 || isPastCutoff;
+                              const isNearlyFull = slot.remaining <= Math.max(1, Math.ceil(slot.maxCapacity * 0.25));
+
+                              return (
+                                <button
+                                  key={slot.time}
+                                  type="button"
+                                  disabled={isUnavailable}
+                                  onClick={() => setFormData({ ...formData, timeSlot: slot.time })}
+                                  className={`p-4 rounded-2xl border transition-all flex justify-between items-center ${formData.timeSlot === slot.time
+                                    ? 'border-primary bg-primary/5 text-primary ring-2 ring-primary/20'
+                                    : 'border-slate-200 bg-white hover:border-primary/50 text-slate-600'
+                                    } ${isUnavailable ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+                                >
+                                  <span className="font-bold">{slot.time}</span>
+                                  <span
+                                    className={`text-xs font-bold px-3 py-1 rounded-full ${isPastCutoff
+                                      ? 'bg-slate-200 text-slate-600'
+                                      : isNearlyFull
+                                        ? 'bg-red-100 text-red-600'
+                                        : 'bg-emerald-100 text-emerald-600'
+                                      }`}
+                                  >
+                                    {isPastCutoff ? 'Not available' : `${slot.remaining} slots left`}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
-                    ))
-                  ) : (
-                    slotAvailability.map((slot) => (
-                      (() => {
-                        const isPastCutoff = isSlotPastCutoff(slot.time);
-                        const isUnavailable = slot.remaining <= 0 || isPastCutoff;
-                        return (
-                          <button
-                            key={slot.time}
-                            type="button"
-                            disabled={isUnavailable}
-                            onClick={() => setFormData({ ...formData, timeSlot: slot.time })}
-                            className={`p-4 rounded-2xl border transition-all flex justify-between items-center ${formData.timeSlot === slot.time
-                              ? 'border-primary bg-primary/5 text-primary ring-2 ring-primary/20'
-                              : 'border-slate-200 bg-white hover:border-primary/50 text-slate-600'
-                              } ${isUnavailable ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
-                          >
-                            <span className="font-bold">{slot.time}</span>
-                            <span
-                              className={`text-xs font-bold px-3 py-1 rounded-full ${isPastCutoff
-                                ? 'bg-slate-200 text-slate-600'
-                                : slot.remaining > 10
-                                  ? 'bg-emerald-100 text-emerald-600'
-                                  : 'bg-red-100 text-red-600'
-                                }`}
-                            >
-                              {isPastCutoff ? 'Not available' : `${slot.remaining} slots left`}
-                            </span>
-                          </button>
-                        );
-                      })()
-                    ))
-                  )}
+                    );
+                  })}
                 </div>
               )}
             </div>
