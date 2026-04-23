@@ -9,10 +9,9 @@ export const queueService = {
     const { data } = await api.get(`/api/queues${query ? `?${query}` : ''}`);
     return data;
   },
-  updateStatus: async (id, status, reason) => {
+  updateStatus: async (id, status) => {
     const { data } = await api.patch(`/api/queues/${id}/status`, {
       status,
-      reason: reason || '',
     });
     return data;
   },
@@ -21,4 +20,3 @@ export const queueService = {
     return data;
   },
 };
-

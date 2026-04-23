@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { queueService } from '../../services/queueService';
-import { Clock, Users, Filter, CheckCircle, Grid3x3, List, XCircle, IdCard, Building2, GraduationCap } from 'lucide-react';
+import { Clock, Users, Filter, CheckCircle, Grid3x3, List, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { addDays, compareAsc, format, isSameDay, isSameMonth, isSameWeek, parseISO } from 'date-fns';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 
-const STATUS_OPTIONS = ['All', 'Waiting', 'Serving', 'Completed', 'Skipped'];
+const STATUS_OPTIONS = ['All', 'Waiting', 'Serving', 'Completed'];
 const DATE_SCOPE_OPTIONS = [
   { value: 'today', label: 'Today' },
   { value: 'all', label: 'All Dates' },
@@ -20,13 +20,7 @@ const STATUS_PRIORITY = {
   Serving: 0,
   Waiting: 1,
   Completed: 2,
-  Skipped: 3,
 };
-
-const NOT_COMPLETED_REASONS = [
-  'Late/Did not attend',
-  'Missing requirements',
-];
 
 const resolveQueueReceiptProfile = (queue) =>
   resolveKioskReceiptProfile({
@@ -110,14 +104,14 @@ export const AdminQueuePage = () => {
   const [viewMode, setViewMode] = useState('card');
 
   const loadQueues = async () => {
-    setLoading(true);
-    try {
-      const data = await queueService.list({ status: 'All' });
-      setQueues(data || []);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to load queues', err);
-      setQueues([]);
+      setLoading(true);
+      try {
+        const data = await queueService.list({ status: 'All' });
+        setQueues((data || []).filter((queue) => queue.status !== 'Skipped'));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load queues', err);
+        setQueues([]);
     } finally {
       setLoading(false);
     }
@@ -127,10 +121,10 @@ export const AdminQueuePage = () => {
     loadQueues();
   }, []);
 
-  const syncQueueStatus = async (id, newStatus, reason = '') => {
+  const syncQueueStatus = async (id, newStatus) => {
     try {
       setUpdatingId(id);
-      const updatedQueue = await queueService.updateStatus(id, newStatus, reason);
+      const updatedQueue = await queueService.updateStatus(id, newStatus);
       setQueues((prev) =>
         prev.map((q) => (q.id === id ? { ...q, status: updatedQueue?.status || newStatus } : q))
       );
@@ -149,7 +143,6 @@ export const AdminQueuePage = () => {
     { label: 'Waiting', value: queues.filter((queue) => queue.status === 'Waiting').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Being Served', value: queues.filter((queue) => queue.status === 'Serving').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: 'Completed', value: queues.filter((queue) => queue.status === 'Completed').length, icon: CheckCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
-    { label: 'Skipped', value: queues.filter((queue) => queue.status === 'Skipped').length, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50' },
   ]), [queues]);
 
   const filteredQueues = useMemo(() => {
@@ -160,6 +153,7 @@ export const AdminQueuePage = () => {
         if (!isDuplicate) seen.add(queue.id);
         return !isDuplicate;
       })
+      .filter((queue) => queue.status !== 'Skipped')
       .filter((queue) => {
         const matchesStatus = statusFilter === 'All' || queue.status === statusFilter;
         const matchesDate = matchesQueueDateScope(queue, dateScope, specificDate);
@@ -194,7 +188,7 @@ export const AdminQueuePage = () => {
   };
 
   const handleServePatient = async (queue) => {
-    if (queue.status === 'Completed' || queue.status === 'Skipped') {
+    if (queue.status === 'Completed') {
       return;
     }
 
@@ -207,26 +201,6 @@ export const AdminQueuePage = () => {
           };
 
     openRecordEntry(activeQueue);
-  };
-
-  const handleSkipPatient = async (queue) => {
-    const reasonInput = window.prompt(
-      `Select not-completed reason:\n1) ${NOT_COMPLETED_REASONS[0]}\n2) ${NOT_COMPLETED_REASONS[1]}\n\nType 1 or 2:`,
-      '1',
-    );
-    if (reasonInput == null) return;
-    const normalized = reasonInput.trim();
-    const reason =
-      normalized === '2'
-        ? NOT_COMPLETED_REASONS[1]
-        : normalized === '1'
-          ? NOT_COMPLETED_REASONS[0]
-          : '';
-    if (!reason) {
-      window.alert('Skipping requires a valid reason (1 or 2).');
-      return;
-    }
-    await syncQueueStatus(queue.id, 'Skipped', reason);
   };
 
   return (
@@ -268,7 +242,7 @@ export const AdminQueuePage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {queueStats.map((stat) => (
           <div key={stat.label} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
             <div className="flex items-center justify-between mb-3">
@@ -470,7 +444,7 @@ export const AdminQueuePage = () => {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                      disabled={updatingId === q.id || q.status === 'Completed'}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleServePatient(q);
@@ -478,17 +452,6 @@ export const AdminQueuePage = () => {
                       className="flex-1 py-2.5 rounded-xl border border-primary/20 bg-primary/5 text-primary text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/10 transition-all disabled:opacity-60"
                     >
                       Serve Patient
-                    </button>
-                    <button
-                      type="button"
-                      disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSkipPatient(q);
-                      }}
-                      className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-600 text-[11px] font-black uppercase tracking-[0.14em] hover:bg-red-100 transition-all disabled:opacity-40"
-                    >
-                      Skip Patient
                     </button>
                   </div>
                 </div>
@@ -586,7 +549,7 @@ export const AdminQueuePage = () => {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
+                          disabled={updatingId === q.id || q.status === 'Completed'}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleServePatient(q);
@@ -594,17 +557,6 @@ export const AdminQueuePage = () => {
                           className="px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 text-primary text-[11px] font-black hover:bg-primary/10 transition-all disabled:opacity-60"
                         >
                           Serve Patient
-                        </button>
-                        <button
-                          type="button"
-                          disabled={updatingId === q.id || q.status === 'Completed' || q.status === 'Skipped'}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSkipPatient(q);
-                          }}
-                          className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 text-[11px] font-black hover:bg-red-100 transition-all disabled:opacity-40"
-                        >
-                          Skip Patient
                         </button>
                       </div>
                     </div>

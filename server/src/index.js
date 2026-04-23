@@ -4300,6 +4300,7 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
   }
 
   conditions.push('q.checked_in_at IS NOT NULL');
+  conditions.push(`q.status <> 'Cancelled'`);
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -4355,13 +4356,9 @@ app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
 
   const id = normalizeIdentifier(req.params?.id);
   const nextStatus = toDatabaseQueueStatus(normalizeIdentifier(req.body?.status));
-  const reason = normalizeIdentifier(req.body?.reason);
 
-  if (!id || !['Waiting', 'Serving', 'Done', 'Cancelled'].includes(nextStatus)) {
+  if (!id || !['Waiting', 'Serving', 'Done'].includes(nextStatus)) {
     return res.status(400).json({ message: 'A valid queue id and status are required.' });
-  }
-  if (nextStatus === 'Cancelled' && !reason) {
-    return res.status(400).json({ message: 'A reason is required when marking as skipped/not completed.' });
   }
 
   const client = await pool.connect();
@@ -4389,19 +4386,6 @@ app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
       rows[0].status,
       rows[0].appointment_id || null,
     );
-
-    if (rows[0].status === 'Cancelled' && updatedAppointment?.id) {
-      const enrichedNotes = appendNotCompletedReason(updatedAppointment.notes, reason);
-      await client.query(
-        `
-          UPDATE public.appointments
-          SET notes = NULLIF($2, '')
-          WHERE id = $1
-        `,
-        [updatedAppointment.id, enrichedNotes],
-      );
-      updatedAppointment.notes = enrichedNotes;
-    }
 
     await client.query('COMMIT');
 
@@ -4466,6 +4450,7 @@ app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
         LEFT JOIN public.appointments a ON a.id = q.appointment_id
         WHERE q.user_id = $1
           AND q.checked_in_at IS NOT NULL
+          AND q.status <> 'Cancelled'
           AND COALESCE(a.appointment_date, DATE(q.checked_in_at AT TIME ZONE 'Asia/Manila'), DATE(q.created_at)) = $2
         ORDER BY q.checked_in_at ASC, q.created_at ASC, q.queue_number ASC
       `,
