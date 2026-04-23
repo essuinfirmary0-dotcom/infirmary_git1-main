@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { queueService } from '../../services/queueService';
-import { Clock, Users, Filter, CheckCircle, Grid3x3, List, IdCard, Building2, GraduationCap } from 'lucide-react';
+import { Users, Filter, CheckCircle, Grid3x3, List, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { addDays, compareAsc, format, isSameDay, isSameMonth, isSameWeek, parseISO } from 'date-fns';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 
@@ -140,7 +140,6 @@ export const AdminQueuePage = () => {
 
   const queueStats = useMemo(() => ([
     { label: 'All Queues', value: queues.length, icon: Users, color: 'text-slate-700', bg: 'bg-slate-100' },
-    { label: 'Waiting', value: queues.filter((queue) => queue.status === 'Waiting').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Being Served', value: queues.filter((queue) => queue.status === 'Serving').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: 'Completed', value: queues.filter((queue) => queue.status === 'Completed').length, icon: CheckCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
   ]), [queues]);
@@ -242,7 +241,7 @@ export const AdminQueuePage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
         {queueStats.map((stat) => (
           <div key={stat.label} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
             <div className="flex items-center justify-between mb-3">

@@ -307,10 +307,9 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
               <p className="text-xs text-slate-500 font-medium">Real-time summary of infirmary activities</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
-                { label: 'Approved', value: appointments.filter(a => a.status === 'Approved').length, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
                 { label: 'Confirmed', value: appointments.filter(a => a.status === 'Confirmed').length, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Completed', value: appointments.filter(a => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                 { label: 'Cancelled', value: appointments.filter(a => a.status === 'Cancelled').length, icon: XCircle, color: 'text-slate-600', bg: 'bg-slate-100' }

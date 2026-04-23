@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   CalendarDays,
   Clock,
-  Clock3,
   CheckCircle,
   Ban,
   Activity,
@@ -32,13 +31,11 @@ export const AdminOverviewPage = () => {
     load();
   }, []);
 
-  const waiting = queues.filter((q) => q.status === 'Waiting').length;
   const serving = queues.filter((q) => q.status === 'Serving').length;
   const completed = queues.filter((q) => q.status === 'Completed').length;
 
   const appointmentStats = [
     { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
-    { label: 'Approved', value: appointments.filter((a) => a.status === 'Approved').length, icon: Clock3, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: 'Confirmed', value: appointments.filter((a) => a.status === 'Confirmed').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: 'Cancelled', value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
@@ -46,7 +43,6 @@ export const AdminOverviewPage = () => {
 
   const queueStats = [
     { label: 'Queues Today', value: queues.length, icon: ListOrdered, color: 'text-slate-700', bg: 'bg-slate-100' },
-    { label: 'Waiting', value: waiting, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: 'Being Served', value: serving, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: completed, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
@@ -62,7 +58,7 @@ export const AdminOverviewPage = () => {
         <p className="text-xs sm:text-sm text-slate-500 font-medium">Real-time summary of infirmary activities</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         {appointmentStats.map((stat, i) => (
           <div key={i} className="bg-white p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all min-w-0">
             <div className="flex items-center justify-between mb-2 sm:mb-4">
@@ -85,7 +81,7 @@ export const AdminOverviewPage = () => {
         <div className="flex-1 h-px bg-slate-200" />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
         {queueStats.map((stat, i) => (
           <div key={i} className="bg-white p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all min-w-0">
             <div className="flex items-center justify-between mb-2 sm:mb-4">
