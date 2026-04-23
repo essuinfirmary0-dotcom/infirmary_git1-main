@@ -13,6 +13,55 @@ import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
 import { AppointmentList } from '../components/AppointmentList';
 import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
+import { QUEUE_DISPLAY_STATUSES } from '../utils/queueStatus';
+
+const QUEUE_VISIBILITY_PRIORITY = [
+  QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING,
+  QUEUE_DISPLAY_STATUSES.UP_NEXT,
+  QUEUE_DISPLAY_STATUSES.IN_LINE,
+];
+
+const resolveQueueVisibilityStatus = (appointments = []) => {
+  const activeQueueStatus = QUEUE_VISIBILITY_PRIORITY.find((status) =>
+    appointments.some((appointment) => String(appointment?.queueDisplayStatus || '').trim() === status),
+  );
+
+  if (activeQueueStatus) {
+    return activeQueueStatus;
+  }
+
+  if (appointments.some((appointment) => String(appointment?.queueStatus || '').trim() === 'Serving')) {
+    return QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING;
+  }
+
+  if (
+    appointments.some(
+      (appointment) =>
+        String(appointment?.queueStatus || '').trim() === 'Waiting'
+        && Boolean(appointment?.queueNumber),
+    )
+  ) {
+    return QUEUE_DISPLAY_STATUSES.IN_LINE;
+  }
+
+  return '';
+};
+
+const getQueueVisibilityTone = (status) => {
+  if (status === QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING) {
+    return { color: 'text-emerald-600', bg: 'bg-emerald-50' };
+  }
+
+  if (status === QUEUE_DISPLAY_STATUSES.UP_NEXT) {
+    return { color: 'text-amber-600', bg: 'bg-amber-50' };
+  }
+
+  if (status === QUEUE_DISPLAY_STATUSES.IN_LINE) {
+    return { color: 'text-blue-600', bg: 'bg-blue-50' };
+  }
+
+  return { color: 'text-slate-600', bg: 'bg-slate-100' };
+};
 
 export const ClientDashboardPage = () => {
   const { userProfile, appointments, isGuestUser } = useApp();
@@ -21,9 +70,22 @@ export const ClientDashboardPage = () => {
     return <Navigate to="/app/book" replace />;
   }
 
+  const queueVisibilityStatus = resolveQueueVisibilityStatus(appointments);
+  const queueVisibilityTone = getQueueVisibilityTone(queueVisibilityStatus);
+
   const stats = [
     { label: 'Total Visits', value: appointments.length, icon: CalendarDays, color: 'text-slate-800', bg: 'bg-slate-50' },
-    { label: getAppointmentStatusLabel('Confirmed'), value: appointments.filter((a) => a.status === 'Confirmed').length, icon: PlayCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
+    {
+      label: 'Queue Status',
+      value: queueVisibilityStatus || 'Not Checked In Yet',
+      icon: PlayCircle,
+      color: queueVisibilityTone.color,
+      bg: queueVisibilityTone.bg,
+      valueClassName: queueVisibilityStatus ? 'text-base sm:text-2xl leading-tight' : 'text-sm sm:text-xl leading-tight',
+      helperText: queueVisibilityStatus
+        ? 'Based on your actual queue position.'
+        : 'Check in first to appear in the active queue.',
+    },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: getAppointmentStatusLabel('Cancelled'), value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
   ];
@@ -73,7 +135,12 @@ export const ClientDashboardPage = () => {
               <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Stats</span>
             </div>
             <p className="text-xs sm:text-sm font-bold text-slate-500 mb-0.5 sm:mb-1 truncate">{stat.label}</p>
-            <h3 className={`text-xl sm:text-3xl font-black ${stat.color}`}>{stat.value}</h3>
+            <h3 className={`${stat.valueClassName || 'text-xl sm:text-3xl'} font-black ${stat.color}`}>{stat.value}</h3>
+            {stat.helperText && (
+              <p className="mt-1 text-[11px] sm:text-xs font-medium leading-snug text-slate-400">
+                {stat.helperText}
+              </p>
+            )}
           </div>
         ))}
       </div>
