@@ -4433,6 +4433,19 @@ app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    if (nextStatus === 'Serving') {
+      await client.query(
+        `
+          UPDATE public.queues
+          SET status = 'Waiting'
+          WHERE id <> $1
+            AND checked_in_at IS NOT NULL
+            AND status = 'Serving'
+        `,
+        [id],
+      );
+    }
+
     const { rows } = await client.query(
       `
         UPDATE public.queues

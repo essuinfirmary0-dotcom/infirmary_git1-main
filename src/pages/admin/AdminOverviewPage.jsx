@@ -13,6 +13,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { queueService } from '../../services/queueService';
 import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
+import { getCompletedQueueEntries, getQueueDisplayRows } from '../../utils/queueStatus';
 
 export const AdminOverviewPage = () => {
   const { appointments } = useApp();
@@ -32,8 +33,9 @@ export const AdminOverviewPage = () => {
     load();
   }, []);
 
-  const serving = queues.filter((q) => q.status === 'Serving').length;
-  const completed = queues.filter((q) => q.status === 'Completed').length;
+  const activeQueueRows = getQueueDisplayRows(queues);
+  const serving = activeQueueRows.filter((queue) => queue.isCurrentServing).length;
+  const completed = getCompletedQueueEntries(queues).length;
 
   const appointmentStats = [
     { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
@@ -43,8 +45,8 @@ export const AdminOverviewPage = () => {
   ];
 
   const queueStats = [
-    { label: 'Queues Today', value: queues.length, icon: ListOrdered, color: 'text-slate-700', bg: 'bg-slate-100' },
-    { label: 'Being Served', value: serving, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Queues Today', value: activeQueueRows.length, icon: ListOrdered, color: 'text-slate-700', bg: 'bg-slate-100' },
+    { label: 'Currently Serving', value: serving, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: completed, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
