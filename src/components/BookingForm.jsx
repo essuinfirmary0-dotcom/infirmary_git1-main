@@ -166,10 +166,13 @@ const DEFAULT_TIME_SLOT_OPTIONS = [
   { time: '2:00 PM - 3:00 PM', maxCapacity: 13, session: 'afternoon' },
   { time: '3:00 PM - 4:00 PM', maxCapacity: 13, session: 'afternoon' },
   { time: '4:00 PM - 5:00 PM', maxCapacity: 11, session: 'afternoon' },
+  { time: '10:00 PM - 11:00 PM', maxCapacity: 10, session: 'night' },
+  { time: '11:00 PM - 12:00 AM', maxCapacity: 10, session: 'night' },
 ];
 const TIME_SLOT_SECTIONS = [
   { key: 'morning', label: 'Morning Session', totalCapacity: 50 },
   { key: 'afternoon', label: 'Afternoon Session', totalCapacity: 50 },
+  { key: 'night', label: 'Temporary Night Session', totalCapacity: 20 },
 ];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
 
@@ -223,18 +226,8 @@ const getNextOpenBookingDate = (baseDate = startOfToday()) => {
 };
 
 const parseTimeSlotEndMinutes = (slotLabel) => {
-  const match = String(slotLabel || '').match(/-\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*$/i);
-  if (!match) return null;
-  let hours = Number(match[1]);
-  const minutes = Number(match[2] || '0');
-  const meridiem = String(match[3] || '').toUpperCase();
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  if (meridiem === 'AM') {
-    hours = hours === 12 ? 0 : hours;
-  } else if (meridiem === 'PM') {
-    hours = hours === 12 ? 12 : hours + 12;
-  }
-  return (hours * 60) + minutes;
+  const slotRange = parseTimeSlotRange(slotLabel);
+  return slotRange?.comparisonEndMinutes ?? null;
 };
 
 const isActiveAppointmentStatus = (status) => !['Completed', 'Cancelled'].includes(String(status || '').trim());
@@ -564,7 +557,11 @@ const parseTimeSlotRange = (timeSlot) => {
   const endMinutes = parseClockToMinutes(match[2]);
   if (startMinutes == null || endMinutes == null) return null;
 
-  return { startMinutes, endMinutes };
+  return {
+    startMinutes,
+    endMinutes,
+    comparisonEndMinutes: endMinutes <= startMinutes ? endMinutes + (24 * 60) : endMinutes,
+  };
 };
 
 const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new Date()) => {
@@ -593,7 +590,7 @@ const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new 
     return { status: 'upcoming', slotRange };
   }
 
-  if (nowMinutes <= slotRange.endMinutes) {
+  if (nowMinutes <= slotRange.comparisonEndMinutes) {
     return { status: 'active', slotRange };
   }
 

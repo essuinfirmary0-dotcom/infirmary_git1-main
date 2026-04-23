@@ -60,7 +60,11 @@ const parseTimeSlotRange = (timeSlot) => {
   const endMinutes = parseClockToMinutes(match[2]);
   if (startMinutes == null || endMinutes == null) return null;
 
-  return { startMinutes, endMinutes };
+  return {
+    startMinutes,
+    endMinutes,
+    comparisonEndMinutes: endMinutes <= startMinutes ? endMinutes + (24 * 60) : endMinutes,
+  };
 };
 
 const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new Date()) => {
@@ -89,7 +93,7 @@ const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new 
     return { status: 'upcoming', slotRange };
   }
 
-  if (nowMinutes <= slotRange.endMinutes) {
+  if (nowMinutes <= slotRange.comparisonEndMinutes) {
     return { status: 'active', slotRange };
   }
 
