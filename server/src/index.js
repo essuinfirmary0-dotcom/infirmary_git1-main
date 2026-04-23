@@ -419,6 +419,7 @@ const DEFAULT_TIME_SLOTS = [
 ];
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
+const DISPLAY_APPOINTMENT_STATUSES = ['Approved', 'Confirmed', 'Completed', 'Cancelled'];
 
 function parseAuthToken(token) {
   try {
@@ -648,9 +649,11 @@ function mapAppointmentRow(row) {
 function mapAppointmentStatusFromDatabase(status, cancelledAt = null) {
   const normalized = String(status || '').trim();
   if (cancelledAt) return 'Cancelled';
-  if (normalized === 'Success') return 'Completed';
-  if (normalized === 'Cancelled') return 'Not Completed';
-  return normalized || 'Waiting';
+  if (['Cancelled', 'Not Completed'].includes(normalized)) return 'Cancelled';
+  if (['Success', 'Completed'].includes(normalized)) return 'Completed';
+  if (['Confirmed', 'Ongoing'].includes(normalized)) return 'Confirmed';
+  if (['Approved', 'Waiting'].includes(normalized)) return 'Approved';
+  return normalized || 'Approved';
 }
 
 async function toDatabaseAppointmentStatus(status) {
@@ -662,11 +665,10 @@ async function toDatabaseAppointmentStatus(status) {
   }
 
   const fallbackCandidates = {
-    Waiting: ['Ongoing'],
-    Ongoing: ['Ongoing'],
-    Completed: ['Success', 'Completed', 'Ongoing'],
+    Approved: ['Approved', 'Waiting', 'Ongoing'],
+    Confirmed: ['Confirmed', 'Ongoing', 'Waiting'],
+    Completed: ['Completed', 'Success', 'Ongoing'],
     Cancelled: ['Cancelled', 'Not Completed', 'Ongoing'],
-    'Not Completed': ['Cancelled', 'Not Completed', 'Ongoing'],
   };
 
   const candidates = fallbackCandidates[normalized] || [normalized];
@@ -693,7 +695,7 @@ function resolveMedicalRecordStatus({ appointmentStatus, appointmentCancelledAt,
     : '';
   const normalizedQueueStatus = queueStatus ? mapQueueStatus(queueStatus) : '';
 
-  if (normalizedAppointmentStatus && normalizedAppointmentStatus !== 'Waiting') {
+  if (normalizedAppointmentStatus && normalizedAppointmentStatus !== 'Approved') {
     return normalizedAppointmentStatus;
   }
 
@@ -747,7 +749,7 @@ function mapQueueRow(row) {
         subcategory: row.appointment_subcategory || '',
         purpose: row.appointment_purpose || '',
         notes: row.appointment_notes || '',
-        status: row.appointment_status || '',
+        status: mapAppointmentStatusFromDatabase(row.appointment_status, row.appointment_cancelled_at),
       }
       : null,
   };
@@ -782,6 +784,63 @@ async function ensureAppointmentCancellationTracking() {
   `);
 }
 
+async function ensureAppointmentStatusFlow() {
+  await pool.query(`
+    DO $$
+    DECLARE constraint_name text;
+    BEGIN
+      FOR constraint_name IN
+        SELECT c.conname
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public'
+          AND t.relname = 'appointments'
+          AND c.contype = 'c'
+          AND pg_get_constraintdef(c.oid) ILIKE '%status%'
+      LOOP
+        EXECUTE format('ALTER TABLE public.appointments DROP CONSTRAINT IF EXISTS %I', constraint_name);
+      END LOOP;
+    END $$;
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.appointments
+    ALTER COLUMN status SET DEFAULT 'Approved'
+  `);
+
+  await pool.query(`
+    UPDATE public.appointments AS a
+    SET status = CASE
+      WHEN a.cancelled_at IS NOT NULL OR a.status IN ('Cancelled', 'Not Completed') THEN 'Cancelled'
+      WHEN a.status IN ('Success', 'Completed') THEN 'Completed'
+      WHEN EXISTS (
+        SELECT 1
+        FROM public.queues q
+        WHERE q.appointment_id = a.id
+          AND q.checked_in_at IS NOT NULL
+          AND q.status = 'Done'
+      ) THEN 'Completed'
+      WHEN EXISTS (
+        SELECT 1
+        FROM public.queues q
+        WHERE q.appointment_id = a.id
+          AND q.checked_in_at IS NOT NULL
+          AND q.status IN ('Waiting', 'Serving')
+      ) THEN 'Confirmed'
+      ELSE 'Approved'
+    END
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.appointments
+    ADD CONSTRAINT appointments_status_check
+    CHECK (status::text = ANY (ARRAY['Approved', 'Confirmed', 'Completed', 'Cancelled']::text[]))
+  `);
+
+  cachedAppointmentStatuses = null;
+}
+
 function mapKioskAppointment(appointment) {
   if (!appointment) {
     return null;
@@ -797,7 +856,7 @@ function mapKioskAppointment(appointment) {
     subcategory: appointment.subcategory || '',
     purpose: appointment.purpose || '',
     notes: appointment.notes || '',
-    status: appointment.status || '',
+    status: mapAppointmentStatusFromDatabase(appointment.status, appointment.cancelled_at),
   };
 }
 
@@ -1406,18 +1465,19 @@ async function findActiveKioskAppointmentForUser(userId, date = getTodayInManila
   }
 
   const completedStatus = await toDatabaseAppointmentStatus('Completed');
-  const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+  const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
   const { rows } = await pool.query(
     `
       SELECT *
       FROM public.appointments
       WHERE user_id = $1
         AND appointment_date = $2
+        AND cancelled_at IS NULL
         AND status NOT IN ($3, $4)
       ORDER BY created_at ASC
       LIMIT 1
     `,
-    [userId, date, completedStatus, notCompletedStatus],
+    [userId, date, completedStatus, cancelledStatus],
   );
 
   return rows[0] || null;
@@ -1430,7 +1490,7 @@ async function findKioskCheckInContextByAppointmentId(appointmentId) {
 
   const today = getTodayInManila();
   const completedStatus = await toDatabaseAppointmentStatus('Completed');
-  const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+  const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
   const { rows } = await pool.query(
     `
       SELECT
@@ -1453,10 +1513,11 @@ async function findKioskCheckInContextByAppointmentId(appointmentId) {
         ON u.id = a.user_id
       WHERE a.id = $1
         AND a.appointment_date = $2
+        AND a.cancelled_at IS NULL
         AND a.status NOT IN ($3, $4)
       LIMIT 1
     `,
-    [appointmentId, today, completedStatus, notCompletedStatus],
+    [appointmentId, today, completedStatus, cancelledStatus],
   );
 
   const row = rows[0];
@@ -1519,13 +1580,13 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
   const normalizedQueueStatus = String(queueStatus || '').trim();
   const derivedAppointmentStatus =
     normalizedQueueStatus === 'Waiting'
-      ? 'Waiting'
+      ? 'Confirmed'
       : normalizedQueueStatus === 'Serving'
-        ? 'Ongoing'
+        ? 'Confirmed'
         : normalizedQueueStatus === 'Done'
           ? 'Completed'
           : normalizedQueueStatus === 'Cancelled'
-            ? 'Not Completed'
+            ? 'Cancelled'
             : null;
 
   if (!derivedAppointmentStatus) {
@@ -1537,10 +1598,9 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
 
   if (!allowedStatuses.includes(nextAppointmentStatus)) {
     const fallbackCandidates = {
-      Waiting: ['Ongoing', 'Success', 'Cancelled'],
-      Ongoing: ['Waiting', 'Success'],
+      Confirmed: ['Confirmed', 'Ongoing', 'Waiting'],
       Completed: ['Success', 'Ongoing'],
-      'Not Completed': ['Cancelled', 'Ongoing'],
+      Cancelled: ['Cancelled', 'Not Completed', 'Ongoing'],
     };
     const candidates = fallbackCandidates[derivedAppointmentStatus] || [];
     const fallback = candidates.find((candidate) => allowedStatuses.includes(candidate));
@@ -1550,17 +1610,23 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
     nextAppointmentStatus = fallback;
   }
 
+  const isCancelledFlow = derivedAppointmentStatus === 'Cancelled';
+  const defaultCancellationReason = 'Automatically cancelled after the scheduled appointment time slot was missed.';
+
   if (appointmentId) {
     const { rows } = await client.query(
       `
         UPDATE public.appointments
         SET status = $2,
-            cancelled_at = NULL,
-            cancellation_reason = NULL
+            cancelled_at = CASE WHEN $3 THEN COALESCE(cancelled_at, now()) ELSE NULL END,
+            cancellation_reason = CASE
+              WHEN $3 THEN COALESCE(cancellation_reason, $4)
+              ELSE NULL
+            END
         WHERE id = $1
         RETURNING *
       `,
-      [appointmentId, nextAppointmentStatus],
+      [appointmentId, nextAppointmentStatus, isCancelledFlow, defaultCancellationReason],
     );
 
     return rows[0] || null;
@@ -1573,13 +1639,18 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
   const { rows } = await client.query(
     `
       UPDATE public.appointments AS a
-      SET status = $2
+      SET status = $2,
+          cancelled_at = CASE WHEN $3 THEN COALESCE(a.cancelled_at, now()) ELSE NULL END,
+          cancellation_reason = CASE
+            WHEN $3 THEN COALESCE(a.cancellation_reason, $4)
+            ELSE NULL
+          END
       FROM public.queues AS q
       WHERE q.id = $1
         AND q.appointment_id = a.id
       RETURNING a.*
     `,
-    [queueId, nextAppointmentStatus],
+    [queueId, nextAppointmentStatus, isCancelledFlow, defaultCancellationReason],
   );
 
   return rows[0] || null;
@@ -1756,16 +1827,16 @@ async function getSlotDefinitions() {
 
 function buildMissedAppointmentNote(existingNotes, timeSlot, dateLabel = 'today') {
   const base = normalizeIdentifier(existingNotes);
-  const reasonLine = `Auto-updated to Not Completed after missing the ${timeSlot} appointment window on ${dateLabel}.`;
+  const reasonLine = `Auto-cancelled after missing the ${timeSlot} appointment window on ${dateLabel}.`;
   if (!base) return reasonLine;
   if (base.includes(reasonLine)) return base;
   return `${base}\n${reasonLine}`;
 }
 
-async function markMissedAppointmentsAsNotCompleted() {
+async function markMissedAppointmentsAsCancelled() {
   const today = getTodayInManila();
   const nowMinutes = getCurrentMinutesInManila();
-  const missedStatus = await toDatabaseAppointmentStatus('Not Completed');
+  const missedStatus = await toDatabaseAppointmentStatus('Cancelled');
   const client = await pool.connect();
 
   try {
@@ -1775,7 +1846,8 @@ async function markMissedAppointmentsAsNotCompleted() {
       `
         SELECT id, user_id, appointment_date, time_slot, notes
         FROM public.appointments
-        WHERE status NOT IN ('Completed', 'Not Completed')
+        WHERE cancelled_at IS NULL
+          AND status NOT IN ('Completed', 'Cancelled')
           AND (
             appointment_date < $1
             OR (
@@ -1827,7 +1899,9 @@ async function markMissedAppointmentsAsNotCompleted() {
         `
           UPDATE public.appointments
           SET status = $2,
-              notes = NULLIF($3, '')
+              notes = NULLIF($3, ''),
+              cancelled_at = COALESCE(cancelled_at, now()),
+              cancellation_reason = COALESCE(cancellation_reason, 'Automatically cancelled after the scheduled appointment time slot was missed.')
           WHERE id = $1
         `,
         [
@@ -2021,42 +2095,16 @@ async function getAllowedAppointmentStatuses() {
     const definition = rows[0]?.definition || '';
     const matches = [...definition.matchAll(/'([^']+)'/g)];
     const statuses = matches.map((m) => m[1]).filter(Boolean);
-    cachedAppointmentStatuses = statuses.length ? statuses : ['Waiting', 'Ongoing', 'Completed', 'Not Completed'];
+    cachedAppointmentStatuses = statuses.length ? statuses : DISPLAY_APPOINTMENT_STATUSES;
     return cachedAppointmentStatuses;
   } catch {
-    cachedAppointmentStatuses = ['Waiting', 'Ongoing', 'Completed', 'Not Completed'];
+    cachedAppointmentStatuses = DISPLAY_APPOINTMENT_STATUSES;
     return cachedAppointmentStatuses;
-  }
-}
-
-async function getAllAllowedAppointmentStatuses() {
-  try {
-    const definition = rows[0]?.definition || {};
-    const matches = [...definition.matchAll(/'([^']+)'/g)];
-    const statuses = matches.map((m) => m[1]).filter(Boolean);
-
-    return statuses.length ? statuses : ['Ongoing', 'Success', 'Cancelled'];
-  } catch {
-    return ['Ongoing', 'Success', 'Cancelled'];
   }
 }
 
 async function getInitialAppointmentStatus() {
-  const allowed = await getAllAllowedAppointmentStatuses();
-
-  if (allowed.includes('Ongoing')) {
-    return 'Ongoing';
-  }
-
-  if (allowed.includes('Success')) {
-    return 'Success';
-  }
-
-  if (allowed.includes('Cancelled')) {
-    return 'Cancelled';
-  }
-
-  return 'Ongoing';
+  return toDatabaseAppointmentStatus('Approved');
 }
 
 app.post('/api/auth/login', async (req, res) => {
@@ -3042,20 +3090,20 @@ app.post('/api/kiosk/check-in', async (req, res) => {
           await createNotification({
             userId: updatedAppointment.user_id,
             type: 'appointment_status',
-            title: 'Appointment skipped',
-            message: `Your ${appointment.time_slot} appointment was marked as Not Completed because you arrived outside your selected time window.`,
+            title: 'Appointment cancelled',
+            message: `Your ${appointment.time_slot} appointment was cancelled because you arrived after the selected time window.`,
             appointmentId: updatedAppointment.id,
           });
         }
 
         return res.status(409).json({
-          code: 'APPOINTMENT_SKIPPED',
-          message: `Your selected appointment time was ${appointment.time_slot}. Because you arrived after that time window, your appointment has been marked as skipped.`,
-          skipped: true,
+          code: 'APPOINTMENT_CANCELLED',
+          message: `Your selected appointment time was ${appointment.time_slot}. Because you arrived after that time window, your appointment has been cancelled.`,
+          cancelled: true,
           queueNumber: updatedQueue.rows[0]?.queue_number || queueRow.queue_number || '',
           user: buildKioskUserPayload(user),
           hasAppointmentToday: true,
-          appointment: mapKioskAppointment(updatedAppointment || { ...appointment, status: 'Not Completed' }),
+          appointment: mapKioskAppointment(updatedAppointment || { ...appointment, status: 'Cancelled', cancelled_at: new Date().toISOString() }),
         });
       } catch (error) {
         await client.query('ROLLBACK');
@@ -3118,9 +3166,9 @@ app.post('/api/kiosk/confirm-check-in', async (req, res) => {
 
     if (arrivalWindow.status === 'missed') {
       return res.status(409).json({
-        code: 'APPOINTMENT_SKIPPED',
+        code: 'APPOINTMENT_CANCELLED',
         message: `Your selected appointment time was ${appointment.time_slot}. This appointment can no longer be checked in because the time window has already passed.`,
-        skipped: true,
+        cancelled: true,
         user: buildKioskUserPayload(user),
         hasAppointmentToday: true,
         appointment: mapKioskAppointment(appointment),
@@ -3145,19 +3193,20 @@ app.get('/api/appointments/slots', loadAuthenticatedUser, async (req, res) => {
   }
 
   try {
-    await markMissedAppointmentsAsNotCompleted();
+    await markMissedAppointmentsAsCancelled();
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
-    const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+    const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
     const slotDefinitions = await getSlotDefinitions();
     const { rows } = await pool.query(
       `
         SELECT time_slot, COUNT(*)::int AS booked_count
         FROM public.appointments
         WHERE appointment_date = $1
+          AND cancelled_at IS NULL
           AND status NOT IN ($2, $3)
         GROUP BY time_slot
       `,
-      [date, completedStatus, notCompletedStatus],
+      [date, completedStatus, cancelledStatus],
     );
 
     const bookedBySlot = new Map(
@@ -3218,10 +3267,10 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
   }
 
   try {
-    await markMissedAppointmentsAsNotCompleted();
+    await markMissedAppointmentsAsCancelled();
     const initialStatus = await getInitialAppointmentStatus();
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
-    const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+    const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
     const requestedScheduleState = evaluateScheduledAppointmentState(date, timeSlot);
     if (requestedScheduleState.status === 'past') {
       return res.status(409).json({
@@ -3241,10 +3290,11 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
         WHERE user_id = $1
           AND appointment_date = $2
           AND time_slot = $3
+          AND cancelled_at IS NULL
           AND status NOT IN ($4, $5)
         LIMIT 1
       `,
-      [req.authUser.id, date, timeSlot, completedStatus, notCompletedStatus],
+      [req.authUser.id, date, timeSlot, completedStatus, cancelledStatus],
     );
 
     if (conflictingRows[0]) {
@@ -3260,11 +3310,12 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
         SELECT time_slot, COUNT(*)::int AS booked_count
         FROM public.appointments
         WHERE appointment_date = $1
+          AND cancelled_at IS NULL
           AND status NOT IN ($2, $3)
           AND time_slot IS NOT NULL
         GROUP BY time_slot
       `,
-      [date, completedStatus, notCompletedStatus],
+      [date, completedStatus, cancelledStatus],
     );
 
     const bookedCount = bookedRows.reduce(
@@ -3374,8 +3425,8 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
   }
 
   try {
-    await markMissedAppointmentsAsNotCompleted();
-    const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+    await markMissedAppointmentsAsCancelled();
+    const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
     const completedStatus = await toDatabaseAppointmentStatus('Completed');
     const existing = await pool.query(
       `
@@ -3394,9 +3445,9 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
 
     const existingAppointment = existing.rows[0];
     const existingStatus = mapAppointmentStatusFromDatabase(existingAppointment.status);
-    if (['Completed', 'Not Completed'].includes(existingStatus)) {
+    if (['Completed', 'Cancelled'].includes(existingStatus)) {
       return res.status(409).json({
-        message: 'Missed, not attended, or completed appointments cannot be rescheduled. Please create a new appointment instead.',
+        message: 'Cancelled or completed appointments cannot be rescheduled. Please create a new appointment instead.',
       });
     }
 
@@ -3423,11 +3474,12 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
         WHERE user_id = $1
           AND appointment_date = $2
           AND time_slot = $3
+          AND cancelled_at IS NULL
           AND status NOT IN ($4, $5)
           AND id <> $6
         LIMIT 1
       `,
-      [req.authUser.id, date, timeSlot, completedStatus, notCompletedStatus, id],
+      [req.authUser.id, date, timeSlot, completedStatus, cancelledStatus, id],
     );
 
     if (conflictingRows[0]) {
@@ -3443,12 +3495,13 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
         SELECT time_slot, COUNT(*)::int AS booked_count
         FROM public.appointments
         WHERE appointment_date = $1
+          AND cancelled_at IS NULL
           AND status NOT IN ($2, $3)
           AND time_slot IS NOT NULL
           AND id <> $4
         GROUP BY time_slot
       `,
-      [date, completedStatus, notCompletedStatus, id],
+      [date, completedStatus, cancelledStatus, id],
     );
 
     const bookedCount = bookedRows.reduce(
@@ -3544,7 +3597,7 @@ app.get('/api/appointments/:id/attachments', loadAuthenticatedUser, async (req, 
 
 app.get('/api/appointments', loadAuthenticatedUser, async (req, res) => {
   try {
-    await markMissedAppointmentsAsNotCompleted();
+    await markMissedAppointmentsAsCancelled();
     const { rows } = await pool.query(
       `
         SELECT
@@ -3577,7 +3630,7 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
   }
 
   try {
-    await markMissedAppointmentsAsNotCompleted();
+    await markMissedAppointmentsAsCancelled();
     const { rows } = await pool.query(
       `
         SELECT
@@ -4153,17 +4206,26 @@ app.patch('/api/appointments/:id/status', loadAuthenticatedUser, async (req, res
   if (!id || !status) {
     return res.status(400).json({ message: 'Appointment id and status are required.' });
   }
+  if (!DISPLAY_APPOINTMENT_STATUSES.includes(status)) {
+    return res.status(400).json({ message: `Appointment status must be one of: ${DISPLAY_APPOINTMENT_STATUSES.join(', ')}.` });
+  }
 
   try {
     const dbStatus = await toDatabaseAppointmentStatus(status);
+    const isCancelledStatus = status === 'Cancelled';
     const { rows } = await pool.query(
       `
         UPDATE public.appointments
-        SET status = $2
+        SET status = $2,
+            cancelled_at = CASE WHEN $3 THEN COALESCE(cancelled_at, now()) ELSE NULL END,
+            cancellation_reason = CASE
+              WHEN $3 THEN COALESCE(cancellation_reason, 'Cancelled by admin.')
+              ELSE NULL
+            END
         WHERE id = $1
         RETURNING *
       `,
-      [id, dbStatus],
+      [id, dbStatus, isCancelledStatus],
     );
 
     if (!rows[0]) {
@@ -4174,7 +4236,7 @@ app.patch('/api/appointments/:id/status', loadAuthenticatedUser, async (req, res
       userId: rows[0].user_id,
       type: 'appointment_status',
       title: 'Appointment updated',
-      message: `Your appointment status is now ${mapAppointmentStatusFromDatabase(rows[0].status)}.`,
+      message: `Your appointment status is now ${mapAppointmentStatusFromDatabase(rows[0].status, rows[0].cancelled_at)}.`,
       appointmentId: rows[0].id,
     });
 
@@ -4193,8 +4255,8 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
   }
 
   try {
-    await markMissedAppointmentsAsNotCompleted();
-    const notCompletedStatus = await toDatabaseAppointmentStatus('Not Completed');
+    await markMissedAppointmentsAsCancelled();
+    const cancelledStatus = await toDatabaseAppointmentStatus('Cancelled');
     const existing = await pool.query(
       `
         SELECT *
@@ -4212,7 +4274,7 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
 
     const existingAppointment = existing.rows[0];
     const existingStatus = mapAppointmentStatusFromDatabase(existingAppointment.status, existingAppointment.cancelled_at);
-    if (['Completed', 'Not Completed', 'Cancelled'].includes(existingStatus)) {
+    if (['Completed', 'Cancelled'].includes(existingStatus)) {
       return res.status(409).json({ message: 'Only upcoming appointments can be cancelled.' });
     }
 
@@ -4240,7 +4302,7 @@ app.post('/api/appointments/:id/cancel', loadAuthenticatedUser, async (req, res)
             AND user_id = $2
           RETURNING *
         `,
-        [id, req.authUser.id, notCompletedStatus, enrichedNotes, cancellationReason],
+        [id, req.authUser.id, cancelledStatus, enrichedNotes, cancellationReason],
       );
 
       updatedAppointment = updated.rows[0];
@@ -4338,7 +4400,8 @@ app.get('/api/queues', loadAuthenticatedUser, async (req, res) => {
           a.subcategory AS appointment_subcategory,
           a.purpose AS appointment_purpose,
           a.notes AS appointment_notes,
-          a.status AS appointment_status
+          a.status AS appointment_status,
+          a.cancelled_at AS appointment_cancelled_at
         FROM public.queues q
         LEFT JOIN public.users_auth u ON u.id = q.user_id
         LEFT JOIN public.appointments a ON a.id = q.appointment_id
@@ -4399,7 +4462,7 @@ app.patch('/api/queues/:id/status', loadAuthenticatedUser, async (req, res) => {
         userId: updatedAppointment.user_id,
         type: 'appointment_status',
         title: 'Appointment updated',
-        message: `Your appointment status is now ${updatedAppointment.status}.`,
+        message: `Your appointment status is now ${mapAppointmentStatusFromDatabase(updatedAppointment.status, updatedAppointment.cancelled_at)}.`,
         appointmentId: updatedAppointment.id,
       });
     }
@@ -4449,7 +4512,8 @@ app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
           a.subcategory AS appointment_subcategory,
           a.purpose AS appointment_purpose,
           a.notes AS appointment_notes,
-          a.status AS appointment_status
+          a.status AS appointment_status,
+          a.cancelled_at AS appointment_cancelled_at
         FROM public.queues q
         LEFT JOIN public.users_auth u ON u.id = q.user_id
         LEFT JOIN public.appointments a ON a.id = q.appointment_id
@@ -4595,14 +4659,17 @@ async function runStartupMaintenance() {
     console.log('Running ensureAppointmentCancellationTracking...');
     await ensureAppointmentCancellationTracking();
 
+    console.log('Running ensureAppointmentStatusFlow...');
+    await ensureAppointmentStatusFlow();
+
     console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();
 
     console.log('Running ensureMedicalRecordAttachmentLabels...');
     await ensureMedicalRecordAttachmentLabels();
 
-    console.log('Running markMissedAppointmentsAsNotCompleted...');
-    await markMissedAppointmentsAsNotCompleted();
+    console.log('Running markMissedAppointmentsAsCancelled...');
+    await markMissedAppointmentsAsCancelled();
 
     console.log('Startup maintenance finished.');
   } catch (error) {
@@ -4610,13 +4677,14 @@ async function runStartupMaintenance() {
   }
 }
 
-void runStartupMaintenance();
-setInterval(() => {
-  void markMissedAppointmentsAsNotCompleted().catch((error) => {
-console.error("Startup maintenance failed:", error.message);
-  });
-}, 60 * 1000);
+void runStartupMaintenance().finally(() => {
+  setInterval(() => {
+    void markMissedAppointmentsAsCancelled().catch((error) => {
+      console.error('Startup maintenance failed:', error.message);
+    });
+  }, 60 * 1000);
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
 });

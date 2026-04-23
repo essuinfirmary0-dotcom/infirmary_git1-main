@@ -347,9 +347,15 @@ export const AppProvider = ({ children }) => {
 
   const handleUpdateStatus = async (id, newStatus) => {
     try {
-      await appointmentService.updateStatus(id, newStatus);
+      const updatedAppointment = await appointmentService.updateStatus(id, newStatus);
       setAppointments((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+        prev.map((a) => (
+          a.id === id
+            ? updatedAppointment
+              ? { ...a, ...updatedAppointment }
+              : { ...a, status: newStatus }
+            : a
+        ))
       );
       fetchNotifications();
       toast.success('Status updated.');

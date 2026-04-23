@@ -24,9 +24,10 @@ const SORT_OPTIONS = [
 const STATUS_FILTER_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'all', label: 'All' },
-  { value: 'ongoing', label: 'Being Served' },
-  { value: 'skipped', label: 'Skipped' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'confirmed', label: 'Confirmed' },
   { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
 
 const toDate = (value) => {
@@ -41,24 +42,26 @@ const toDate = (value) => {
 const getAppointmentStatusKey = (status) => {
   const normalized = String(status || '').trim();
   if (normalized === 'Completed') return 'completed';
-  if (normalized === 'Not Completed') return 'skipped';
-  if (normalized === 'Ongoing') return 'ongoing';
+  if (normalized === 'Cancelled') return 'cancelled';
+  if (normalized === 'Confirmed') return 'confirmed';
+  if (normalized === 'Approved') return 'approved';
   return 'other';
 };
 
 const matchesStatusFilter = (appointment, filterValue) => {
   const statusKey = getAppointmentStatusKey(appointment?.status);
   if (filterValue === 'all') return true;
-  if (filterValue === 'active') return statusKey !== 'completed';
+  if (filterValue === 'active') return !['completed', 'cancelled'].includes(statusKey);
   return statusKey === filterValue;
 };
 
 const getStatusPriority = (status) => {
   const statusKey = getAppointmentStatusKey(status);
-  if (statusKey === 'ongoing') return 0;
-  if (statusKey === 'skipped') return 1;
+  if (statusKey === 'confirmed') return 0;
+  if (statusKey === 'approved') return 1;
   if (statusKey === 'completed') return 2;
-  return 3;
+  if (statusKey === 'cancelled') return 3;
+  return 4;
 };
 
 const matchesDateScope = (dateValue, scope, specificDate) => {
@@ -159,7 +162,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
 
                   <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                    <p className="text-sm font-black text-slate-800">{appointment.status || 'Waiting'}</p>
+                    <p className="text-sm font-black text-slate-800">{appointment.status || 'Approved'}</p>
                   </div>
                 </div>
               </div>

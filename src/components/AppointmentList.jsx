@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, XCircle, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap } from 'lucide-react';
+import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
 
@@ -97,7 +97,7 @@ const evaluateScheduledAppointmentState = (appointmentDate, timeSlot, now = new 
 
 const isReschedulableAppointment = (appointment) => {
   const status = String(appointment?.status || '').trim();
-  if (!appointment || ['Completed', 'Not Completed', 'Cancelled'].includes(status)) {
+  if (!appointment || ['Completed', 'Cancelled'].includes(status)) {
     return false;
   }
 
@@ -106,7 +106,7 @@ const isReschedulableAppointment = (appointment) => {
 
 const isCancellableAppointment = (appointment) => {
   const status = String(appointment?.status || '').trim();
-  if (!appointment || ['Completed', 'Not Completed', 'Cancelled'].includes(status)) {
+  if (!appointment || ['Completed', 'Cancelled'].includes(status)) {
     return false;
   }
 
@@ -115,18 +115,16 @@ const isCancellableAppointment = (appointment) => {
 
 const StatusBadge = ({ status }) => {
   const styles = {
-    'Waiting': 'bg-amber-50 text-amber-700 border-amber-100',
-    'Ongoing': 'bg-blue-50 text-blue-600 border-blue-100',
-    'Not Completed': 'bg-red-50 text-red-600 border-red-100',
+    'Approved': 'bg-amber-50 text-amber-700 border-amber-100',
+    'Confirmed': 'bg-blue-50 text-blue-600 border-blue-100',
     'Cancelled': 'bg-slate-100 text-slate-600 border-slate-200',
     'Moved': 'bg-amber-50 text-amber-600 border-amber-100',
     'Completed': 'bg-emerald-50 text-emerald-600 border-emerald-100',
   };
 
   const icons = {
-    'Waiting': <Clock size={12} />,
-    'Ongoing': <PlayCircle size={12} />,
-    'Not Completed': <XCircle size={12} />,
+    'Approved': <Clock size={12} />,
+    'Confirmed': <PlayCircle size={12} />,
     'Cancelled': <Trash2 size={12} />,
     'Moved': <RefreshCw size={12} />,
     'Completed': <CheckCircle size={12} />,
@@ -473,15 +471,9 @@ export const AppointmentList = ({
               </div>
             )}
 
-            {isClient && apt.status === 'Not Completed' && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                This appointment was not attended. Create a new appointment if you still need this service.
-              </div>
-            )}
-
             {isClient && apt.status === 'Cancelled' && (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
-                This appointment was cancelled. You can create a new appointment if you still need this service.
+                This appointment was cancelled. If you still need this service, please create a new appointment.
               </div>
             )}
 
@@ -508,14 +500,8 @@ export const AppointmentList = ({
                   Cancel Appointment
                 </button>
               )}
-              {!isClient && onUpdateStatus && !['Not Completed', 'Completed', 'Cancelled'].includes(apt.status) && (
+              {!isClient && onUpdateStatus && !['Completed', 'Cancelled'].includes(apt.status) && (
                 <>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onUpdateStatus(apt.id, 'Moved'); }}
-                    className="flex-1 py-2 text-xs font-medium border border-amber-200 text-amber-600 rounded-lg hover:bg-amber-50 transition-colors"
-                  >
-                    Move
-                  </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); onUpdateStatus(apt.id, 'Completed'); }}
                     className="flex-1 py-2 text-xs font-medium border border-emerald-200 text-emerald-600 rounded-lg hover:bg-emerald-50 transition-colors"
@@ -528,7 +514,7 @@ export const AppointmentList = ({
                 <button
                   onClick={(e) => { e.stopPropagation(); onCancel(apt.id); }}
                   className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                  title="Mark as Not Completed"
+                  title="Cancel appointment"
                 >
                   <Trash2 size={18} />
                 </button>

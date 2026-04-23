@@ -307,12 +307,13 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
               <p className="text-xs text-slate-500 font-medium">Real-time summary of infirmary activities</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {[
                 { label: 'Total Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-600', bg: 'bg-slate-100' },
-                { label: 'Ongoing', value: appointments.filter(a => a.status === 'Ongoing').length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'Approved', value: appointments.filter(a => a.status === 'Approved').length, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
+                { label: 'Confirmed', value: appointments.filter(a => a.status === 'Confirmed').length, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Completed', value: appointments.filter(a => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                { label: 'Not Completed', value: appointments.filter(a => a.status === 'Not Completed').length, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50' }
+                { label: 'Cancelled', value: appointments.filter(a => a.status === 'Cancelled').length, icon: XCircle, color: 'text-slate-600', bg: 'bg-slate-100' }
               ].map((stat, i) => (
                 <div key={i} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
                   <div className="flex items-center justify-between mb-3">
@@ -516,9 +517,10 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
                     className="w-full px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-[11px]"
                   >
                     <option value="All">All Status</option>
-                    <option value="Ongoing">Ongoing</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Confirmed">Confirmed</option>
                     <option value="Completed">Completed</option>
-                    <option value="Not Completed">Not Completed</option>
+                    <option value="Cancelled">Cancelled</option>
                   </select>
                 </div>
               </div>
@@ -565,13 +567,15 @@ export const AdminDashboard = ({ appointments, onUpdateStatus, onLogout, mockUse
                         onChange={(e) => onUpdateStatus(apt.id, e.target.value)}
                         className={`px-1.5 py-1 rounded-md font-bold text-[9px] border-2 transition-all focus:outline-none ${
                           apt.status === 'Completed' ? 'border-emerald-100 bg-emerald-50 text-emerald-600' :
-                          apt.status === 'Not Completed' ? 'border-red-100 bg-red-50 text-red-600' :
+                          apt.status === 'Cancelled' ? 'border-slate-200 bg-slate-100 text-slate-600' :
+                          apt.status === 'Approved' ? 'border-amber-100 bg-amber-50 text-amber-700' :
                           'border-blue-100 bg-blue-50 text-blue-600'
                         }`}
                       >
-                        <option value="Ongoing">Ongoing</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Confirmed">Confirmed</option>
                         <option value="Completed">Completed</option>
-                        <option value="Not Completed">Not Completed</option>
+                        <option value="Cancelled">Cancelled</option>
                       </select>
                     </div>
                   ))}

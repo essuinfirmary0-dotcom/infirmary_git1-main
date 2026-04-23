@@ -237,7 +237,7 @@ const parseTimeSlotEndMinutes = (slotLabel) => {
   return (hours * 60) + minutes;
 };
 
-const isActiveAppointmentStatus = (status) => !['Completed', 'Not Completed'].includes(String(status || '').trim());
+const isActiveAppointmentStatus = (status) => !['Completed', 'Cancelled'].includes(String(status || '').trim());
 
 const ConfirmationModal = ({
   isOpen,

@@ -563,8 +563,8 @@ export function KioskCheckIn() {
         <p className="font-bold">
           {kioskError.code === 'NO_APPOINTMENT_TODAY'
             ? 'No appointment found'
-            : kioskError.code === 'APPOINTMENT_SKIPPED'
-              ? 'Appointment skipped'
+            : ['APPOINTMENT_CANCELLED', 'APPOINTMENT_SKIPPED'].includes(kioskError.code)
+              ? 'Appointment cancelled'
               : kioskError.code === 'APPOINTMENT_TOO_EARLY'
                 ? 'Too early for check-in'
             : 'Check-in could not be completed'}

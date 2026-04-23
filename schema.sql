@@ -111,12 +111,14 @@ CREATE TABLE public.appointments (
     appointment_date date NOT NULL,
     time_slot character varying NOT NULL,
     notes text,
-    status character varying DEFAULT 'Ongoing'::character varying NOT NULL,
+    status character varying DEFAULT 'Approved'::character varying NOT NULL,
+    cancelled_at timestamp with time zone,
+    cancellation_reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     slot_definition_id uuid,
     CONSTRAINT appointments_service_check CHECK (((service)::text = ANY (ARRAY[('Dental'::character varying)::text, ('Medical'::character varying)::text, ('Nutrition'::character varying)::text]))),
-    CONSTRAINT appointments_status_check CHECK (((status)::text = ANY (ARRAY[('Ongoing'::character varying)::text, ('Success'::character varying)::text, ('Cancelled'::character varying)::text])))
+    CONSTRAINT appointments_status_check CHECK (((status)::text = ANY (ARRAY[('Approved'::character varying)::text, ('Confirmed'::character varying)::text, ('Completed'::character varying)::text, ('Cancelled'::character varying)::text])))
 );
 
 
@@ -286,6 +288,7 @@ CREATE TABLE public.queues (
     queue_number character varying NOT NULL,
     appointment_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    checked_in_at timestamp with time zone,
     status character varying DEFAULT 'Waiting'::character varying NOT NULL,
     CONSTRAINT queues_status_check CHECK (((status)::text = ANY (ARRAY[('Waiting'::character varying)::text, ('Serving'::character varying)::text, ('Done'::character varying)::text, ('Cancelled'::character varying)::text])))
 );
@@ -751,4 +754,3 @@ ALTER TABLE ONLY public.users_auth
 --
 
 \unrestrict qtYTzzU3K1cbZWfgc16uX0mdHOYptS9csQ8qaj5JhqbzJm65dO1Hre5Uv8v8w74
-

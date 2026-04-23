@@ -3,9 +3,10 @@ import { Link, Navigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   CalendarDays,
+  Clock3,
   PlayCircle,
   CheckCircle,
-  XCircle,
+  Ban,
   HeartPulse,
   ClipboardList,
 } from 'lucide-react';
@@ -22,9 +23,10 @@ export const ClientDashboardPage = () => {
 
   const stats = [
     { label: 'Total Visits', value: appointments.length, icon: CalendarDays, color: 'text-slate-800', bg: 'bg-slate-50' },
-    { label: 'Ongoing', value: appointments.filter((a) => a.status === 'Ongoing').length, icon: PlayCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Approved', value: appointments.filter((a) => a.status === 'Approved').length, icon: Clock3, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Confirmed', value: appointments.filter((a) => a.status === 'Confirmed').length, icon: PlayCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Completed', value: appointments.filter((a) => a.status === 'Completed').length, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Not Completed', value: appointments.filter((a) => a.status === 'Not Completed').length, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50' },
+    { label: 'Cancelled', value: appointments.filter((a) => a.status === 'Cancelled').length, icon: Ban, color: 'text-slate-600', bg: 'bg-slate-100' },
   ];
 
   return (
@@ -62,7 +64,7 @@ export const ClientDashboardPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-6">
         {stats.map((stat, i) => (
           <div key={i} className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
             <div className="flex items-center justify-between mb-2 sm:mb-4">
