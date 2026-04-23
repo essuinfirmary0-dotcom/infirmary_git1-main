@@ -234,7 +234,8 @@ function isEmployeeLikeUser(user) {
   const normalizedUserType = normalizeUserType(getEffectiveUserType(user));
 
   if (!normalizedUserType) {
-    return false;
+    return Boolean(normalizeIdentifier(user?.employee_number))
+      && !normalizeIdentifier(user?.student_number);
   }
 
   if (STUDENT_USER_TYPES.has(normalizedUserType) || NON_EMPLOYEE_USER_TYPES.has(normalizedUserType)) {
@@ -254,6 +255,26 @@ function resolveActualUserIdentifier(user) {
   }
 
   return pickActualIdentifier(idNumber, studentNumber, employeeNumber) || idNumber || null;
+}
+
+function buildResolvedIdentityFields(user) {
+  const userType = getEffectiveUserType(user) || null;
+  const normalizedUserType = normalizeUserType(userType);
+  const guestUser = isGuestUserType(normalizedUserType);
+  const employeeUser = isEmployeeLikeUser({ ...user, user_type: userType });
+  const actualIdentifier = resolveActualUserIdentifier({ ...user, user_type: userType });
+  const studentUser = !guestUser
+    && !employeeUser
+    && !NON_EMPLOYEE_USER_TYPES.has(normalizedUserType)
+    && Boolean(actualIdentifier || normalizeIdentifier(user?.student_number));
+
+  return {
+    userType,
+    actualIdentifier,
+    idNumber: normalizeIdentifier(user?.id_number) || actualIdentifier || null,
+    studentNumber: studentUser ? actualIdentifier : null,
+    employeeNumber: employeeUser ? actualIdentifier : null,
+  };
 }
 
 function resolveEmployeePosition(user) {
@@ -364,6 +385,8 @@ function getUserDisplayName(user) {
 }
 
 function mapManagedUserRow(user) {
+  const identity = buildResolvedIdentityFields(user);
+
   return {
     id: user.id,
     firstName: user.firstname || '',
@@ -373,9 +396,10 @@ function mapManagedUserRow(user) {
     email: user.email || '',
     phone: user.phone || '',
     address: user.address || '',
-    idNumber: user.id_number || null,
-    employeeNumber: user.employee_number || null,
-    userType: getEffectiveUserType(user),
+    idNumber: identity.idNumber,
+    studentNumber: identity.studentNumber,
+    employeeNumber: identity.employeeNumber,
+    userType: identity.userType,
     role: user.role || null,
     status: user.status || null,
     createdAt: user.created_at || null,
@@ -523,11 +547,9 @@ async function generateGuestIdentifier() {
 }
 
 function resolveKioskReceiptIdentity(user) {
-  const normalizedUserType = normalizeUserType(getEffectiveUserType(user));
-  const studentNumber = normalizeIdentifier(user?.student_number);
-  const employeeNumber = normalizeIdentifier(user?.employee_number);
-  const idNumber = normalizeIdentifier(user?.id_number);
-  const guestIdentifier = idNumber || normalizeIdentifier(user?.qr_data);
+  const identity = buildResolvedIdentityFields(user);
+  const normalizedUserType = normalizeUserType(identity.userType);
+  const guestIdentifier = identity.idNumber || normalizeIdentifier(user?.qr_data);
 
   if (isGuestUserType(normalizedUserType)) {
     return {
@@ -541,14 +563,14 @@ function resolveKioskReceiptIdentity(user) {
     return {
       type: 'employee',
       label: 'Employee Number',
-      value: employeeNumber || idNumber || null,
+      value: identity.employeeNumber || identity.idNumber || null,
     };
   }
 
   return {
     type: 'student',
     label: 'Student ID Number',
-    value: idNumber || studentNumber || null,
+    value: identity.studentNumber || identity.idNumber || null,
   };
 }
 
@@ -584,6 +606,14 @@ function formatMinutesToClockLabel(totalMinutes) {
 }
 
 function mapAppointmentRow(row) {
+  const identity = buildResolvedIdentityFields({
+    id_number: row.appointment_id_number,
+    student_number: row.appointment_student_number,
+    employee_number: row.appointment_employee_number,
+    user_type: row.appointment_user_type,
+    role: row.appointment_user_role,
+  });
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -603,13 +633,10 @@ function mapAppointmentRow(row) {
     cancellationReason: row.cancellation_reason || '',
     college: row.appointment_college || '',
     program: row.appointment_program || '',
-    studentNumber: row.appointment_student_number || null,
-    employeeNumber: row.appointment_employee_number || null,
-    idNumber: row.appointment_id_number || null,
-    userType: getEffectiveUserType({
-      user_type: row.appointment_user_type,
-      role: row.appointment_user_role,
-    }) || null,
+    studentNumber: identity.studentNumber,
+    employeeNumber: identity.employeeNumber,
+    idNumber: identity.idNumber,
+    userType: identity.userType,
   };
 }
 
@@ -656,6 +683,16 @@ function toDatabaseQueueStatus(status) {
 }
 
 function mapQueueRow(row) {
+  const userIdentity = row.user_id
+    ? buildResolvedIdentityFields({
+        id_number: row.user_id_number,
+        student_number: row.user_student_number,
+        employee_number: row.user_employee_number,
+        user_type: row.user_user_type,
+        role: row.user_role,
+      })
+    : null;
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -669,15 +706,12 @@ function mapQueueRow(row) {
         id: row.user_id,
         name: [row.user_firstname, row.user_middle_initial, row.user_lastname].filter(Boolean).join(' ') || row.user_email || 'Unknown',
         email: row.user_email || '',
-        studentNumber: row.user_student_number || null,
-        employeeNumber: row.user_employee_number || null,
-        idNumber: row.user_id_number || null,
+        studentNumber: userIdentity?.studentNumber || null,
+        employeeNumber: userIdentity?.employeeNumber || null,
+        idNumber: userIdentity?.idNumber || null,
         college: row.user_college || '',
         program: row.user_program || '',
-        userType: getEffectiveUserType({
-          user_type: row.user_user_type,
-          role: row.user_role,
-        }) || null,
+        userType: userIdentity?.userType || null,
       }
       : null,
     appointment: row.appointment_id
@@ -910,12 +944,22 @@ function buildKioskResult({ user, appointment, queueNumber, checkInDate = new Da
 }
 
 function mapPatientRow(row) {
+  const identity = buildResolvedIdentityFields({
+    id_number: row.id_number,
+    student_number: row.student_number,
+    employee_number: row.employee_number,
+    user_type: row.user_type,
+    role: row.role,
+  });
+
   return {
     id: row.id,
-    name: [row.firstname, row.middle_initial, row.lastname].filter(Boolean).join(' ') || row.email || row.student_number || row.employee_number || 'Unknown patient',
+    name: [row.firstname, row.middle_initial, row.lastname].filter(Boolean).join(' ') || row.email || identity.actualIdentifier || 'Unknown patient',
     email: row.email || '',
-    studentNumber: row.student_number || null,
-    employeeNumber: row.employee_number || null,
+    studentNumber: identity.studentNumber,
+    employeeNumber: identity.employeeNumber,
+    idNumber: identity.idNumber,
+    userType: identity.userType,
   };
 }
 
@@ -2553,10 +2597,7 @@ app.get('/api/admin/client-users', loadAuthenticatedUser, async (req, res) => {
       `,
     );
 
-    return res.json(rows.map((user) => ({
-      ...mapManagedUserRow(user),
-      studentNumber: user.student_number || null,
-    })));
+    return res.json(rows.map(mapManagedUserRow));
   } catch (error) {
     return res.status(500).json({
       message: 'Failed to load user accounts.',
@@ -2625,10 +2666,7 @@ app.patch('/api/admin/client-users/:id/status', loadAuthenticatedUser, async (re
 
     return res.json({
       message: `User account ${nextStatus === 'blocked' ? 'blocked' : 'activated'} successfully.`,
-      user: {
-        ...mapManagedUserRow(rows[0]),
-        studentNumber: rows[0].student_number || null,
-      },
+      user: mapManagedUserRow(rows[0]),
     });
   } catch (error) {
     return res.status(500).json({
@@ -3550,7 +3588,7 @@ app.get('/api/consultations/patients', loadAuthenticatedUser, async (req, res) =
   try {
     const { rows } = await pool.query(
       `
-        SELECT id, firstname, middle_initial, lastname, email, student_number, employee_number
+        SELECT id, firstname, middle_initial, lastname, email, id_number, student_number, employee_number, user_type, role
         FROM public.users_auth
         WHERE COALESCE(user_type, role, '') NOT IN ('admin', 'super_admin')
         ORDER BY firstname ASC, lastname ASC, email ASC
@@ -3686,7 +3724,7 @@ app.get('/api/medical-records/patients', loadAuthenticatedUser, async (req, res)
   try {
     const { rows } = await pool.query(
       `
-        SELECT id, firstname, middle_initial, lastname, email, student_number, employee_number
+        SELECT id, firstname, middle_initial, lastname, email, id_number, student_number, employee_number, user_type, role
         FROM public.users_auth
         WHERE COALESCE(user_type, role, '') NOT IN ('admin', 'super_admin')
         ORDER BY firstname ASC, lastname ASC, email ASC
@@ -4343,10 +4381,16 @@ app.get('/api/queues/my', loadAuthenticatedUser, async (req, res) => {
           q.checked_in_at,
           q.status,
           u.firstname AS user_firstname,
+          u.middle_initial AS user_middle_initial,
           u.lastname AS user_lastname,
           u.email AS user_email,
           u.student_number AS user_student_number,
           u.employee_number AS user_employee_number,
+          u.id_number AS user_id_number,
+          u.college AS user_college,
+          u.program AS user_program,
+          u.user_type AS user_user_type,
+          u.role AS user_role,
           a.appointment_code,
           a.patient_name,
           a.appointment_date,

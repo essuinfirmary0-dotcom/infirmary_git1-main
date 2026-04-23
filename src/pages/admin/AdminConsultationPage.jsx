@@ -5,6 +5,7 @@ import { addDays, compareAsc, compareDesc, isSameDay, isSameMonth, isSameWeek, p
 import toast from 'react-hot-toast';
 import { useApp } from '../../context/AppContext';
 import { consultationService } from '../../services/consultationService';
+import { getRoleIdentityInfo, resolveDisplayIdentifier } from '../../utils/userIdentity';
 
 const toastStyle = {
   borderRadius: '12px',
@@ -46,6 +47,11 @@ const matchesLogDateScope = (recordedAt, scope, specificDate) => {
   return true;
 };
 
+const getPatientIdentifierText = (user) => {
+  const { identifierLabel, identifierValue } = getRoleIdentityInfo(user || {});
+  return identifierValue ? `${identifierLabel}: ${identifierValue}` : '';
+};
+
 export const AdminConsultationPage = () => {
   const {
     consultationPatients,
@@ -84,6 +90,8 @@ export const AdminConsultationPage = () => {
               patientEmail: patient.email,
               studentNumber: patient.studentNumber || null,
               employeeNumber: patient.employeeNumber || null,
+              idNumber: patient.idNumber || null,
+              userType: patient.userType || null,
             }));
           } catch {
             return [];
@@ -103,9 +111,8 @@ export const AdminConsultationPage = () => {
     return (consultationPatients || []).filter((user) => {
       const inName = user.name?.toLowerCase().includes(q);
       const inEmail = user.email?.toLowerCase().includes(q);
-      const inStudent = user.studentNumber?.toLowerCase().includes(q);
-      const inEmployee = user.employeeNumber?.toLowerCase().includes(q);
-      return inName || inEmail || inStudent || inEmployee;
+      const inIdentifier = resolveDisplayIdentifier(user)?.toLowerCase().includes(q);
+      return inName || inEmail || inIdentifier;
     });
   }, [patientSearchQuery, consultationPatients]);
 
@@ -118,8 +125,7 @@ export const AdminConsultationPage = () => {
           q === '' ||
           record.patientName?.toLowerCase().includes(q) ||
           record.patientEmail?.toLowerCase().includes(q) ||
-          record.studentNumber?.toLowerCase().includes(q) ||
-          record.employeeNumber?.toLowerCase().includes(q);
+          resolveDisplayIdentifier(record)?.toLowerCase().includes(q);
         return matchesDate && matchesSearch;
       })
       .sort((a, b) => {
@@ -166,6 +172,7 @@ export const AdminConsultationPage = () => {
       setIsSaving(false);
     }
   };
+  const selectedUserIdentifierText = getPatientIdentifierText(selectedUser);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 sm:space-y-6 min-w-0">
@@ -266,34 +273,38 @@ export const AdminConsultationPage = () => {
             <div className="text-center py-8 text-sm font-bold text-slate-400">No consultation logs match the current filters.</div>
           ) : (
             <div className="space-y-3">
-              {filteredLogs.map((record) => (
-                <div key={record.id} className="bg-white border border-slate-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-black text-slate-800">{record.patientName || 'Unknown patient'}</p>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/10 px-2 py-1 rounded-full">
-                        {record.systolic}/{record.diastolic}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium mt-1">
-                      {record.patientEmail || 'No email'}
-                    </p>
-                    {(record.studentNumber || record.employeeNumber) && (
-                      <p className="text-[11px] text-slate-400 font-semibold mt-1">
-                        {record.studentNumber || record.employeeNumber}
+              {filteredLogs.map((record) => {
+                const patientIdentifierText = getPatientIdentifierText(record);
+
+                return (
+                  <div key={record.id} className="bg-white border border-slate-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-black text-slate-800">{record.patientName || 'Unknown patient'}</p>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/10 px-2 py-1 rounded-full">
+                          {record.systolic}/{record.diastolic}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium mt-1">
+                        {record.patientEmail || 'No email'}
                       </p>
-                    )}
+                      {patientIdentifierText && (
+                        <p className="text-[11px] text-slate-400 font-semibold mt-1">
+                          {patientIdentifierText}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-left sm:text-right shrink-0">
+                      <p className="text-xs font-black text-slate-700">
+                        {record.recordedAt ? new Date(record.recordedAt).toLocaleString() : ''}
+                      </p>
+                      <p className="text-[11px] text-slate-400 font-semibold mt-1">
+                        Consultation entry
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-left sm:text-right shrink-0">
-                    <p className="text-xs font-black text-slate-700">
-                      {record.recordedAt ? new Date(record.recordedAt).toLocaleString() : ''}
-                    </p>
-                    <p className="text-[11px] text-slate-400 font-semibold mt-1">
-                      Consultation entry
-                    </p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -321,31 +332,35 @@ export const AdminConsultationPage = () => {
             {searchedUsers.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Results</p>
-                {searchedUsers.map((user) => (
-                  <button
-                    key={user.id}
-                    onClick={() => setSelectedUser(user)}
-                    className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between group ${
-                      selectedUser?.id === user.id ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-slate-100 hover:border-primary/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all">
-                        <User size={20} />
+                {searchedUsers.map((user) => {
+                  const patientIdentifierText = getPatientIdentifierText(user);
+
+                  return (
+                    <button
+                      key={user.id}
+                      onClick={() => setSelectedUser(user)}
+                      className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between group ${
+                        selectedUser?.id === user.id ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-slate-100 hover:border-primary/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all">
+                          <User size={20} />
+                        </div>
+                        <div>
+                          <p className="font-black text-slate-800 text-sm">{user.name}</p>
+                          <p className="text-xs text-slate-500 font-medium">{user.email}</p>
+                          {patientIdentifierText && (
+                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                              {patientIdentifierText}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-black text-slate-800 text-sm">{user.name}</p>
-                        <p className="text-xs text-slate-500 font-medium">{user.email}</p>
-                        {(user.studentNumber || user.employeeNumber) && (
-                          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                            {user.studentNumber || user.employeeNumber}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all" />
-                  </button>
-                ))}
+                      <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all" />
+                    </button>
+                  );
+                })}
               </div>
             ) : patientSearchQuery.trim() !== '' ? (
               <div className="text-center py-6 text-slate-400 font-bold text-sm">No patients found.</div>
@@ -384,6 +399,9 @@ export const AdminConsultationPage = () => {
                   <div>
                     <p className="text-base font-black text-slate-800">{selectedUser.name}</p>
                     <p className="text-xs text-slate-500 font-medium">{selectedUser.email}</p>
+                    {selectedUserIdentifierText && (
+                      <p className="text-[11px] text-slate-400 font-semibold mt-1">{selectedUserIdentifierText}</p>
+                    )}
                   </div>
                 </div>
               </div>

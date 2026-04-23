@@ -20,6 +20,7 @@ import toast from 'react-hot-toast';
 import { medicalRecordService } from '../../services/medicalRecordService';
 import { appointmentService } from '../../services/appointmentService';
 import { baseURL } from '../../services/api';
+import { getRoleIdentityInfo, resolveDisplayIdentifier } from '../../utils/userIdentity';
 
 const toastStyle = {
   borderRadius: '12px',
@@ -40,6 +41,11 @@ function appointmentNeedsRequirementFiles(appointment) {
     String(appointment?.service || '').toLowerCase() === 'medical' &&
     String(appointment?.subcategory || '').toLowerCase() === 'certification'
   );
+}
+
+function getPatientIdentifierText(user) {
+  const { identifierLabel, identifierValue } = getRoleIdentityInfo(user || {});
+  return identifierValue ? `${identifierLabel}: ${identifierValue}` : '';
 }
 
 function buildQueueDraft(queueContext) {
@@ -158,8 +164,7 @@ export const AdminRecordsPage = () => {
       (user) =>
         user.name?.toLowerCase().includes(q) ||
         user.email?.toLowerCase().includes(q) ||
-        user.studentNumber?.toLowerCase().includes(q) ||
-        user.employeeNumber?.toLowerCase().includes(q)
+        resolveDisplayIdentifier(user)?.toLowerCase().includes(q)
     );
   }, [recordsSearchQuery, patients]);
 
@@ -197,6 +202,8 @@ export const AdminRecordsPage = () => {
       email: queueContext.user.email || '',
       studentNumber: queueContext.user.studentNumber || null,
       employeeNumber: queueContext.user.employeeNumber || null,
+      idNumber: queueContext.user.idNumber || null,
+      userType: queueContext.user.userType || null,
     };
 
     const draft = buildQueueDraft(queueContext);
@@ -263,6 +270,7 @@ export const AdminRecordsPage = () => {
             },
           ]
         : [];
+  const selectedRecordUserIdentifierText = getPatientIdentifierText(selectedRecordUser);
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
@@ -450,34 +458,43 @@ export const AdminRecordsPage = () => {
               <div className="space-y-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Results</p>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {recordsSearchedUsers.map((user) => (
-                    <button
-                      key={user.id}
-                      onClick={() => {
-                        setSelectedRecordUser(user);
-                        setIsAddingRecord(false);
-                        setSelectedRecordTile(null);
-                        setRecordDefaultNotes('');
-                        setRecordNotes('');
-                        setRecordTitle('');
-                        setHardcopyVerified(false);
-                      }}
-                      className={`w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between group ${
-                        selectedRecordUser?.id === user.id ? 'border-primary bg-white ring-2 ring-primary/15 shadow-sm' : 'border-slate-200 bg-white/90 hover:border-primary/30 hover:bg-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                          <User size={20} />
+                  {recordsSearchedUsers.map((user) => {
+                    const patientIdentifierText = getPatientIdentifierText(user);
+
+                    return (
+                      <button
+                        key={user.id}
+                        onClick={() => {
+                          setSelectedRecordUser(user);
+                          setIsAddingRecord(false);
+                          setSelectedRecordTile(null);
+                          setRecordDefaultNotes('');
+                          setRecordNotes('');
+                          setRecordTitle('');
+                          setHardcopyVerified(false);
+                        }}
+                        className={`w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between group ${
+                          selectedRecordUser?.id === user.id ? 'border-primary bg-white ring-2 ring-primary/15 shadow-sm' : 'border-slate-200 bg-white/90 hover:border-primary/30 hover:bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all shrink-0">
+                            <User size={20} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-800 text-sm truncate">{user.name}</p>
+                            <p className="text-xs text-slate-500 font-medium truncate">{user.email}</p>
+                            {patientIdentifierText && (
+                              <p className="text-[11px] text-slate-400 font-semibold mt-0.5 truncate">
+                                {patientIdentifierText}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="font-black text-slate-800 text-sm truncate">{user.name}</p>
-                          <p className="text-xs text-slate-500 font-medium truncate">{user.email}</p>
-                        </div>
-                      </div>
-                      <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all shrink-0" />
-                    </button>
-                  ))}
+                        <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all shrink-0" />
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : recordsSearchQuery.trim() !== '' ? (
@@ -499,9 +516,9 @@ export const AdminRecordsPage = () => {
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.22em]">Selected Patient</p>
                   <h2 className="text-base sm:text-lg font-black text-slate-900 truncate">{selectedRecordUser.name}</h2>
                   <p className="text-sm text-slate-500 font-medium truncate">{selectedRecordUser.email || 'No email available'}</p>
-                  {(selectedRecordUser.studentNumber || selectedRecordUser.employeeNumber) && (
+                  {selectedRecordUserIdentifierText && (
                     <p className="text-xs text-slate-400 font-semibold mt-1">
-                      {selectedRecordUser.studentNumber || selectedRecordUser.employeeNumber}
+                      {selectedRecordUserIdentifierText}
                     </p>
                   )}
                 </div>
