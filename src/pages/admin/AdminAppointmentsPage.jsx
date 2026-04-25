@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { format, isSameDay, parseISO, addDays, isSameWeek, isSameMonth, compareAsc, compareDesc } from 'date-fns';
+import ReactCalendar from 'react-calendar';
+import 'react-calendar/dist/Calendar.css';
+import { isSameDay, parseISO, addDays, isSameWeek, isSameMonth, compareAsc, compareDesc, startOfDay, isValid } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List, Building2, GraduationCap, IdCard } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,15 +9,6 @@ import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
-
-const DATE_SCOPE_OPTIONS = [
-  { value: 'all', label: 'All Dates' },
-  { value: 'today', label: 'Today' },
-  { value: 'tomorrow', label: 'Tomorrow' },
-  { value: 'thisWeek', label: 'This Week' },
-  { value: 'thisMonth', label: 'This Month' },
-  { value: 'specific', label: 'Specific Date' },
-];
 
 const SORT_OPTIONS = [
   { value: 'oldest', label: 'Oldest First' },
@@ -34,10 +27,16 @@ const STATUS_FILTER_OPTIONS = [
 const toDate = (value) => {
   if (!value) return null;
   try {
-    return parseISO(value);
+    const parsed = typeof value === 'string' ? parseISO(value) : new Date(value);
+    return isValid(parsed) ? parsed : null;
   } catch {
     return null;
   }
+};
+
+const normalizeCalendarDate = (value) => {
+  const parsed = toDate(value);
+  return parsed ? startOfDay(parsed) : startOfDay(new Date());
 };
 
 const getAppointmentStatusKey = (status) => {
@@ -65,28 +64,58 @@ const getStatusPriority = (status) => {
   return 4;
 };
 
-const matchesDateScope = (dateValue, scope, specificDate) => {
+const matchesRelativeDateScope = (dateValue, scope) => {
   const date = toDate(dateValue);
   if (!date) return false;
 
   const today = new Date();
   const tomorrow = addDays(today, 1);
 
+  if (scope === 'all') return true;
   if (scope === 'today') return isSameDay(date, today);
   if (scope === 'tomorrow') return isSameDay(date, tomorrow);
   if (scope === 'thisWeek') return isSameWeek(date, today, { weekStartsOn: 1 });
   if (scope === 'thisMonth') return isSameMonth(date, today);
-  if (scope === 'specific') return specificDate ? dateValue === specificDate : true;
   return true;
 };
 
-const getScopeLabel = (scope, specificDate) => {
-  if (scope === 'today') return `Results for ${format(new Date(), 'MMM d, yyyy')}`;
-  if (scope === 'tomorrow') return `Results for ${format(addDays(new Date(), 1), 'MMM d, yyyy')}`;
-  if (scope === 'thisWeek') return `Results for ${format(new Date(), "'Week of' MMM d, yyyy")}`;
-  if (scope === 'thisMonth') return `Results for ${format(new Date(), 'MMMM yyyy')}`;
-  if (scope === 'specific') return specificDate ? `Results for ${safeFormat(specificDate, 'MMM d, yyyy')}` : 'Results for selected date';
-  return 'All appointments';
+const APPOINTMENT_SESSION_SECTIONS = [
+  { key: 'morning', label: 'Morning Session', alwaysVisible: true },
+  { key: 'afternoon', label: 'Afternoon Session', alwaysVisible: true },
+  { key: 'night', label: 'Temporary Night Session', alwaysVisible: false },
+  { key: 'other', label: 'Other Schedule', alwaysVisible: false },
+];
+
+const parseClockToMinutes = (value) => {
+  const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || '0');
+  const meridiem = String(match[3] || '').toUpperCase();
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === 'AM') {
+      hours = hours === 12 ? 0 : hours;
+    } else if (meridiem === 'PM') {
+      hours = hours === 12 ? 12 : hours + 12;
+    }
+  }
+
+  return (hours * 60) + minutes;
+};
+
+const getAppointmentSessionKey = (timeValue) => {
+  const match = String(timeValue || '').trim().match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)/i);
+  if (!match) return 'other';
+
+  const startMinutes = parseClockToMinutes(match[1]);
+  if (startMinutes == null) return 'other';
+  if (startMinutes < 12 * 60) return 'morning';
+  if (startMinutes < 18 * 60) return 'afternoon';
+  return 'night';
 };
 
 const AppointmentDetailModal = ({ appointment, onClose }) => {
@@ -256,18 +285,17 @@ export const AdminAppointmentsPage = () => {
   const [filterService, setFilterService] = useState('All');
   const [statusFilter, setStatusFilter] = useState('active');
   const [appointmentSearchQuery, setAppointmentSearchQuery] = useState('');
-  const [dateScope, setDateScope] = useState('today');
-  const [specificDate, setSpecificDate] = useState('');
+  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [sortOrder, setSortOrder] = useState('oldest');
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [viewMode, setViewMode] = useState('list');
 
   const appointmentStats = useMemo(() => ([
     { label: 'All Appointments', value: appointments.length, icon: CalendarDays, color: 'text-slate-700', bg: 'bg-slate-100' },
-    { label: 'Today', value: appointments.filter((apt) => matchesDateScope(apt.date, 'today')).length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Tomorrow', value: appointments.filter((apt) => matchesDateScope(apt.date, 'tomorrow')).length, icon: CheckCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'This Week', value: appointments.filter((apt) => matchesDateScope(apt.date, 'thisWeek')).length, icon: CheckCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
-    { label: 'This Month', value: appointments.filter((apt) => matchesDateScope(apt.date, 'thisMonth')).length, icon: XCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Today', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'today')).length, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Tomorrow', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'tomorrow')).length, icon: CheckCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'This Week', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'thisWeek')).length, icon: CheckCircle, color: 'text-violet-600', bg: 'bg-violet-50' },
+    { label: 'This Month', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'thisMonth')).length, icon: XCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ]), [appointments]);
 
   const filteredAppointments = useMemo(() => {
@@ -279,7 +307,8 @@ export const AdminAppointmentsPage = () => {
           appointmentSearchQuery.trim() === '' ||
           (apt.patientName && apt.patientName.toLowerCase().includes(appointmentSearchQuery.toLowerCase())) ||
           (apt.appointmentCode && apt.appointmentCode.toLowerCase().includes(appointmentSearchQuery.toLowerCase()));
-        const matchesDate = matchesDateScope(apt.date, dateScope, specificDate);
+        const appointmentDate = toDate(apt.date);
+        const matchesDate = appointmentDate ? isSameDay(appointmentDate, selectedDate) : false;
 
         return matchesService && matchesStatus && matchesSearch && matchesDate;
       })
@@ -289,6 +318,9 @@ export const AdminAppointmentsPage = () => {
 
         const dateA = toDate(a.date);
         const dateB = toDate(b.date);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
         const dateComparison = sortOrder === 'oldest' ? compareAsc(dateA, dateB) : compareDesc(dateA, dateB);
         if (dateComparison !== 0) return dateComparison;
 
@@ -296,7 +328,36 @@ export const AdminAppointmentsPage = () => {
         const timeB = String(b.time || '');
         return sortOrder === 'oldest' ? timeA.localeCompare(timeB) : timeB.localeCompare(timeA);
       });
-  }, [appointments, filterService, statusFilter, appointmentSearchQuery, dateScope, specificDate, sortOrder]);
+  }, [appointments, filterService, statusFilter, appointmentSearchQuery, selectedDate, sortOrder]);
+
+  const appointmentsBySession = useMemo(() => {
+    const groupedAppointments = {
+      morning: [],
+      afternoon: [],
+      night: [],
+      other: [],
+    };
+
+    filteredAppointments.forEach((appointment) => {
+      const sessionKey = getAppointmentSessionKey(appointment.time);
+      if (!groupedAppointments[sessionKey]) {
+        groupedAppointments.other.push(appointment);
+        return;
+      }
+
+      groupedAppointments[sessionKey].push(appointment);
+    });
+
+    return groupedAppointments;
+  }, [filteredAppointments]);
+
+  const visibleSessionSections = useMemo(
+    () =>
+      APPOINTMENT_SESSION_SECTIONS.filter(
+        (section) => section.alwaysVisible || (appointmentsBySession[section.key] || []).length > 0,
+      ),
+    [appointmentsBySession],
+  );
 
   useEffect(() => {
     const focusId = location.state?.focusAppointmentId;
@@ -305,6 +366,7 @@ export const AdminAppointmentsPage = () => {
     const target = appointments.find((apt) => apt.id === focusId);
     if (target) {
       setSelectedAppointment(target);
+      setSelectedDate(normalizeCalendarDate(target.date));
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, appointments, navigate, location.pathname]);
@@ -313,10 +375,72 @@ export const AdminAppointmentsPage = () => {
     setFilterService('All');
     setStatusFilter('active');
     setAppointmentSearchQuery('');
-    setDateScope('today');
-    setSpecificDate('');
+    setSelectedDate(startOfDay(new Date()));
     setSortOrder('oldest');
   };
+
+  const renderAppointmentCard = (appointment) => (
+    <button
+      key={appointment.id}
+      type="button"
+      onClick={() => setSelectedAppointment(appointment)}
+      className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
+    >
+      <div className="flex items-start gap-3">
+        <div className="w-11 h-11 bg-white rounded-xl flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
+          <span className="text-[8px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
+          <span className="text-sm font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
+        </div>
+      </div>
+      <div className="min-w-0">
+        <h4 className="text-sm font-black text-slate-800 leading-tight truncate">{appointment.patientName || 'Anonymous'}</h4>
+        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          <span className="text-[10px] font-black text-primary uppercase">{appointment.appointmentCode}</span>
+          <span className="text-[10px] text-slate-400">|</span>
+          <span className="text-[10px] text-slate-500 font-bold">{appointment.time}</span>
+          <span className="text-[10px] text-slate-400">|</span>
+          <span className="text-[10px] text-slate-500 font-bold">{appointment.service}</span>
+        </div>
+        <p className="text-xs text-slate-600 font-semibold mt-2 truncate">
+          {appointment.purpose || 'No purpose provided'}
+        </p>
+        {appointment.notes && (
+          <p className="text-xs text-slate-500 mt-1 line-clamp-2 whitespace-pre-wrap">
+            {appointment.notes}
+          </p>
+        )}
+      </div>
+    </button>
+  );
+
+  const renderAppointmentListRow = (appointment) => (
+    <button
+      key={appointment.id}
+      type="button"
+      onClick={() => setSelectedAppointment(appointment)}
+      className="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
+    >
+      <div className="flex items-center gap-4 flex-1 min-w-0">
+        <div className="w-10 h-10 bg-white rounded-lg flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
+          <span className="text-[7px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
+          <span className="text-xs font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-black text-slate-800 truncate">{appointment.patientName || 'Anonymous'}</h4>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
+            <span className="font-black text-primary uppercase">{appointment.appointmentCode}</span>
+            <span className="text-slate-400">|</span>
+            <span className="text-slate-500 font-bold">{appointment.time}</span>
+            <span className="text-slate-400">|</span>
+            <span className="text-slate-500 font-bold">{appointment.service}</span>
+          </div>
+          <p className="text-[11px] text-slate-600 font-semibold mt-1 truncate">
+            {appointment.purpose || 'No purpose provided'}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
 
   return (
     <>
@@ -326,7 +450,7 @@ export const AdminAppointmentsPage = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">Appointments</h1>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium">Display all appointments by default, then sort or check by date when needed.</p>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">Browse appointments by calendar date, then review each session for that day.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <div className="relative group min-w-0 flex-1 sm:flex-initial sm:min-w-[220px]">
@@ -380,155 +504,133 @@ export const AdminAppointmentsPage = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm items-end">
-            <div className="space-y-1.5 flex flex-col">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date View</label>
-              <select
-                value={dateScope}
-                onChange={(e) => setDateScope(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-              >
-                {DATE_SCOPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
+          <div className="grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)] gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 sm:p-4">
+              <div className="mb-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Appointment Calendar</p>
+                <p className="mt-1 text-xs text-slate-500 font-medium">Pick any past, current, or future date to view that day’s schedule.</p>
+              </div>
+              <ReactCalendar
+                onChange={(nextValue) => {
+                  const nextDate = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+                  if (!nextDate) {
+                    return;
+                  }
 
-            <div className="space-y-1.5 flex flex-col">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Specific Date</label>
-              <input
-                type="date"
-                value={specificDate}
-                onChange={(e) => {
-                  setSpecificDate(e.target.value);
-                  if (e.target.value) setDateScope('specific');
+                  setSelectedDate(normalizeCalendarDate(nextDate));
                 }}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+                value={selectedDate}
+                className="rounded-xl border-none w-full max-w-full"
               />
             </div>
 
-            <div className="space-y-1.5 flex flex-col">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Order</label>
-              <select
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-              >
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Selected Date</p>
+                <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-lg font-black text-slate-900">{safeFormat(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
+                    <p className="text-xs text-slate-500 font-medium">Appointments are grouped below by session for this selected day.</p>
+                  </div>
+                  <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
+                    {filteredAppointments.length} Found
+                  </span>
+                </div>
+              </div>
 
-            <div className="space-y-1.5 flex flex-col">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-              >
-                {STATUS_FILTER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1.5 flex flex-col">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Order</label>
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+                  >
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="space-y-1.5 flex flex-col">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service</label>
-              <select
-                value={filterService}
-                onChange={(e) => setFilterService(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-              >
-                <option value="All">All Services</option>
-                <option value="Medical">Medical</option>
-                <option value="Dental">Dental</option>
-                <option value="Nutrition">Nutrition</option>
-              </select>
-            </div>
+                <div className="space-y-1.5 flex flex-col">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+                  >
+                    {STATUS_FILTER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
 
+                <div className="space-y-1.5 flex flex-col">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service</label>
+                  <select
+                    value={filterService}
+                    onChange={(e) => setFilterService(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+                  >
+                    <option value="All">All Services</option>
+                    <option value="Medical">Medical</option>
+                    <option value="Dental">Dental</option>
+                    <option value="Nutrition">Nutrition</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-4 px-1 gap-3">
-            <h2 className="text-sm font-black text-slate-800 tracking-tight">{getScopeLabel(dateScope, specificDate)}</h2>
+            <h2 className="text-sm font-black text-slate-800 tracking-tight">
+              Appointments for {safeFormat(selectedDate, 'MMMM d, yyyy')}
+            </h2>
             <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
               {filteredAppointments.length} Found
             </span>
           </div>
           {filteredAppointments.length === 0 ? (
             <div className="text-center py-32">
-              <p className="text-slate-400 font-bold text-sm">No matches found.</p>
-            </div>
-          ) : viewMode === 'card' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredAppointments.map((apt) => {
-                return (
-                  <button
-                    key={apt.id}
-                    type="button"
-                    onClick={() => setSelectedAppointment(apt)}
-                    className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="w-11 h-11 bg-white rounded-xl flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
-                        <span className="text-[8px] font-black text-primary uppercase">{safeFormat(apt.date, 'MMM')}</span>
-                        <span className="text-sm font-black text-slate-800 leading-none">{safeFormat(apt.date, 'dd')}</span>
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="text-sm font-black text-slate-800 leading-tight truncate">{apt.patientName || 'Anonymous'}</h4>
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        <span className="text-[10px] font-black text-primary uppercase">{apt.appointmentCode}</span>
-                        <span className="text-[10px] text-slate-400">|</span>
-                        <span className="text-[10px] text-slate-500 font-bold">{apt.time}</span>
-                        <span className="text-[10px] text-slate-400">|</span>
-                        <span className="text-[10px] text-slate-500 font-bold">{apt.service}</span>
-                      </div>
-                      <p className="text-xs text-slate-600 font-semibold mt-2 truncate">
-                        {apt.purpose || 'No purpose provided'}
-                      </p>
-                      {apt.notes && (
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-2 whitespace-pre-wrap">
-                          {apt.notes}
-                        </p>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              <p className="text-slate-400 font-bold text-sm">No appointments found for the selected date.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {filteredAppointments.map((apt) => {
+            <div className="space-y-5">
+              {visibleSessionSections.map((section) => {
+                const sessionAppointments = appointmentsBySession[section.key] || [];
+
                 return (
-                  <button
-                    key={apt.id}
-                    type="button"
-                    onClick={() => setSelectedAppointment(apt)}
-                    className="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
-                  >
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className="w-10 h-10 bg-white rounded-lg flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
-                        <span className="text-[7px] font-black text-primary uppercase">{safeFormat(apt.date, 'MMM')}</span>
-                        <span className="text-xs font-black text-slate-800 leading-none">{safeFormat(apt.date, 'dd')}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-black text-slate-800 truncate">{apt.patientName || 'Anonymous'}</h4>
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
-                          <span className="font-black text-primary uppercase">{apt.appointmentCode}</span>
-                          <span className="text-slate-400">|</span>
-                          <span className="text-slate-500 font-bold">{apt.time}</span>
-                          <span className="text-slate-400">|</span>
-                          <span className="text-slate-500 font-bold">{apt.service}</span>
-                        </div>
-                        <p className="text-[11px] text-slate-600 font-semibold mt-1 truncate">
-                          {apt.purpose || 'No purpose provided'}
+                  <div key={section.key} className="rounded-2xl border border-slate-100 overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900">{section.label}</h3>
+                        <p className="text-xs text-slate-500 font-medium">
+                          {sessionAppointments.length > 0
+                            ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
+                            : 'No appointments in this session.'}
                         </p>
                       </div>
+                      <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                        {sessionAppointments.length}
+                      </span>
                     </div>
-                  </button>
+
+                    {sessionAppointments.length === 0 ? (
+                      <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
+                        No appointments scheduled for the {section.label.toLowerCase()}.
+                      </div>
+                    ) : viewMode === 'card' ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+                        {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
+                      </div>
+                    ) : (
+                      <div className="space-y-2 p-3">
+                        {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
