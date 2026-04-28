@@ -30,6 +30,7 @@ const APPOINTMENT_SESSION_SECTIONS = [
   { key: 'morning', label: 'Morning Session' },
   { key: 'afternoon', label: 'Afternoon Session' },
 ];
+const GUEST_VISIBLE_RESULT_COUNT = 3;
 
 const APPOINTMENT_AUDIENCE_SECTIONS = [
   {
@@ -517,7 +518,7 @@ export const AdminAppointmentsPage = () => {
         key={appointment.id}
         type="button"
         onClick={() => setSelectedAppointment(appointment)}
-        className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
+        className="min-h-[112px] p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
       >
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 bg-white rounded-xl flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
@@ -554,7 +555,7 @@ export const AdminAppointmentsPage = () => {
         key={appointment.id}
         type="button"
         onClick={() => setSelectedAppointment(appointment)}
-        className="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
+        className="min-h-[92px] p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
       >
         <div className="flex items-center gap-4 flex-1 min-w-0">
           <div className="w-10 h-10 bg-white rounded-lg flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
@@ -583,45 +584,109 @@ export const AdminAppointmentsPage = () => {
     );
   };
 
-  const renderSessionGroups = (appointmentsBySession, sessionSections) => (
+  const renderResultItems = (appointments, { scrollable = false } = {}) => {
+    if (appointments.length === 0) {
+      return null;
+    }
+
+    const content = viewMode === 'card' ? (
+      <div className={`grid grid-cols-1 ${scrollable ? 'gap-3 p-3' : 'gap-4 p-4'}`}>
+        {appointments.map((appointment) => renderAppointmentCard(appointment))}
+      </div>
+    ) : (
+      <div className="space-y-2 p-3">
+        {appointments.map((appointment) => renderAppointmentListRow(appointment))}
+      </div>
+    );
+
+    if (!scrollable) {
+      return content;
+    }
+
+    return (
+      <div
+        className={`overflow-y-auto overscroll-contain pr-1 ${
+          viewMode === 'card' ? 'max-h-[396px]' : 'max-h-[320px]'
+        }`}
+      >
+        {content}
+      </div>
+    );
+  };
+
+  const renderResultSection = ({
+    title,
+    appointments,
+    emptyMessage,
+    description,
+    scrollable = false,
+  }) => (
+    <div className="rounded-2xl border border-slate-100 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-black text-slate-900">{title}</h3>
+          <p className="text-xs text-slate-500 font-medium">
+            {description || (
+              appointments.length > 0
+                ? `${appointments.length} appointment${appointments.length === 1 ? '' : 's'} scheduled`
+                : 'No appointments in this section.'
+            )}
+          </p>
+        </div>
+        <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
+          {appointments.length}
+        </span>
+      </div>
+
+      {appointments.length === 0 ? (
+        <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
+          {emptyMessage}
+        </div>
+      ) : (
+        renderResultItems(appointments, { scrollable })
+      )}
+    </div>
+  );
+
+  const renderSessionGroups = (appointmentsBySession, sessionSections, options = {}) => (
     <div className="space-y-5">
       {sessionSections.map((sessionSection) => {
         const sessionAppointments = appointmentsBySession[sessionSection.key] || [];
 
         return (
-          <div key={sessionSection.key} className="rounded-2xl border border-slate-100 overflow-hidden">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
-              <div>
-                <h3 className="text-sm font-black text-slate-900">{sessionSection.label}</h3>
-                <p className="text-xs text-slate-500 font-medium">
-                  {sessionAppointments.length > 0
-                    ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
-                    : 'No appointments in this session.'}
-                </p>
-              </div>
-              <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
-                {sessionAppointments.length}
-              </span>
-            </div>
-
-            {sessionAppointments.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
-                No appointments scheduled for the {sessionSection.label.toLowerCase()}.
-              </div>
-            ) : viewMode === 'card' ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-                {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
-              </div>
-            ) : (
-              <div className="space-y-2 p-3">
-                {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
-              </div>
-            )}
+          <div key={sessionSection.key}>
+            {renderResultSection({
+              title: sessionSection.label,
+              appointments: sessionAppointments,
+              emptyMessage: `No appointments scheduled for the ${sessionSection.label.toLowerCase()}.`,
+              description: sessionAppointments.length > 0
+                ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
+                : 'No appointments in this session.',
+              scrollable: options.scrollable,
+            })}
           </div>
         );
       })}
     </div>
   );
+
+  const renderGuestResults = () => {
+    if (sessionFilter === 'all') {
+      return renderResultSection({
+        title: 'Appointment Results',
+        appointments: filteredGuestAppointments,
+        emptyMessage: 'No guest appointments found for the selected filters.',
+        description: filteredGuestAppointments.length > 0
+          ? `${Math.min(filteredGuestAppointments.length, GUEST_VISIBLE_RESULT_COUNT)} of ${filteredGuestAppointments.length} appointment${filteredGuestAppointments.length === 1 ? '' : 's'} visible`
+          : 'No guest appointments match the selected filters.',
+        scrollable: filteredGuestAppointments.length > GUEST_VISIBLE_RESULT_COUNT,
+      });
+    }
+
+    return renderSessionGroups(guestAppointmentsBySession, guestVisibleSessionSections, {
+      scrollable: true,
+    });
+  };
 
   const renderAudienceSection = (audienceSection) => {
     const isGuestSection = audienceSection.key === 'guest';
@@ -800,7 +865,7 @@ export const AdminAppointmentsPage = () => {
                 </div>
               </div>
 
-              {renderSessionGroups(guestAppointmentsBySession, guestVisibleSessionSections)}
+              {renderGuestResults()}
             </div>
           </div>
         </div>
