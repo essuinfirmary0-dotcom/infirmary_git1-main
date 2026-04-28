@@ -36,13 +36,13 @@ const APPOINTMENT_AUDIENCE_SECTIONS = [
     key: 'guest',
     label: 'GUEST',
     title: 'Guest Appointments',
-    description: 'Guest appointments for the selected calendar date.',
+    description: 'Guest appointments for the selected calendar date filtered by the guest-only controls above.',
   },
   {
     key: 'student',
     label: 'STUDENTS',
     title: 'Student Appointments',
-    description: 'Student appointments for the selected calendar date.',
+    description: 'Student appointments for the selected calendar date. Guest filters do not change this section.',
   },
 ];
 
@@ -410,43 +410,56 @@ export const AdminAppointmentsPage = () => {
     { label: 'This Month', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'thisMonth')).length, icon: XCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ]), [appointments]);
 
-  const filteredAppointments = useMemo(() => {
+  const selectedDateAppointments = useMemo(() => {
     const normalizedSearchQuery = appointmentSearchQuery.trim().toLowerCase();
 
     return [...appointments]
       .filter((appointment) => {
-        const matchesService = filterService === 'All' || appointment.service === filterService;
-        const matchesStatus = matchesStatusFilter(appointment, statusFilter);
         const matchesSearch =
           normalizedSearchQuery === '' ||
           buildAppointmentSearchIndex(appointment).includes(normalizedSearchQuery);
         const appointmentDate = toDate(appointment.date);
         const matchesDate = appointmentDate ? isSameDay(appointmentDate, selectedDate) : false;
-        const matchesSession = matchesSessionFilter(appointment, sessionFilter);
 
-        return matchesService && matchesStatus && matchesSearch && matchesDate && matchesSession;
+        return matchesSearch && matchesDate;
       })
       .sort(compareAppointments);
-  }, [appointments, filterService, statusFilter, appointmentSearchQuery, selectedDate, sessionFilter]);
+  }, [appointments, appointmentSearchQuery, selectedDate]);
 
-  const appointmentsByAudience = useMemo(() => {
-    const grouped = {
-      guest: [],
-      student: [],
-    };
+  const guestAppointmentsForSelectedDate = useMemo(
+    () => selectedDateAppointments.filter((appointment) => getAppointmentAudienceKey(appointment) === 'guest'),
+    [selectedDateAppointments],
+  );
 
-    filteredAppointments.forEach((appointment) => {
-      grouped[getAppointmentAudienceKey(appointment)].push(appointment);
-    });
+  const studentAppointmentsForSelectedDate = useMemo(
+    () => selectedDateAppointments.filter((appointment) => getAppointmentAudienceKey(appointment) === 'student'),
+    [selectedDateAppointments],
+  );
 
-    return grouped;
-  }, [filteredAppointments]);
+  const filteredGuestAppointments = useMemo(
+    () => (
+      guestAppointmentsForSelectedDate.filter((appointment) => {
+        const matchesService = filterService === 'All' || appointment.service === filterService;
+        const matchesStatus = matchesStatusFilter(appointment, statusFilter);
+        const matchesSession = matchesSessionFilter(appointment, sessionFilter);
 
-  const appointmentsByAudienceAndSession = useMemo(() => ({
-    guest: buildAppointmentsBySession(appointmentsByAudience.guest),
-    student: buildAppointmentsBySession(appointmentsByAudience.student),
-  }), [appointmentsByAudience]);
-  const visibleSessionSections = useMemo(
+        return matchesService && matchesStatus && matchesSession;
+      })
+    ),
+    [guestAppointmentsForSelectedDate, filterService, statusFilter, sessionFilter],
+  );
+
+  const guestAppointmentsBySession = useMemo(
+    () => buildAppointmentsBySession(filteredGuestAppointments),
+    [filteredGuestAppointments],
+  );
+
+  const studentAppointmentsBySession = useMemo(
+    () => buildAppointmentsBySession(studentAppointmentsForSelectedDate),
+    [studentAppointmentsForSelectedDate],
+  );
+
+  const guestVisibleSessionSections = useMemo(
     () => (
       sessionFilter === 'all'
         ? APPOINTMENT_SESSION_SECTIONS
@@ -570,8 +583,10 @@ export const AdminAppointmentsPage = () => {
   };
 
   const renderAudienceSection = (audienceSection) => {
-    const audienceAppointments = appointmentsByAudience[audienceSection.key] || [];
-    const appointmentsBySession = appointmentsByAudienceAndSession[audienceSection.key] || buildAppointmentsBySession([]);
+    const isGuestSection = audienceSection.key === 'guest';
+    const audienceAppointments = isGuestSection ? filteredGuestAppointments : studentAppointmentsForSelectedDate;
+    const appointmentsBySession = isGuestSection ? guestAppointmentsBySession : studentAppointmentsBySession;
+    const sessionSections = isGuestSection ? guestVisibleSessionSections : APPOINTMENT_SESSION_SECTIONS;
 
     return (
       <div key={audienceSection.key} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
@@ -589,7 +604,7 @@ export const AdminAppointmentsPage = () => {
         </div>
 
         <div className="space-y-5">
-          {visibleSessionSections.map((sessionSection) => {
+          {sessionSections.map((sessionSection) => {
             const sessionAppointments = appointmentsBySession[sessionSection.key] || [];
 
             return (
@@ -715,14 +730,14 @@ export const AdminAppointmentsPage = () => {
 
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Selected Date</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">GUEST APPOINTMENTS</p>
                 <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="text-lg font-black text-slate-900">{safeFormat(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
                     <p className="text-xs text-slate-500 font-medium">
                       {isSelectedDateBlocked
-                        ? 'This date is blocked for new bookings, but admin records for the day remain visible below.'
-                        : 'Guest and student appointments are grouped below by session for this selected day.'}
+                        ? 'This date is blocked for new bookings, but guest appointment records for the day remain visible below.'
+                        : 'Session, status, and service filters in this panel apply to guest appointments only.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -732,7 +747,7 @@ export const AdminAppointmentsPage = () => {
                       </span>
                     )}
                     <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
-                      {filteredAppointments.length} Found
+                      {filteredGuestAppointments.length} Found
                     </span>
                   </div>
                 </div>
@@ -784,17 +799,6 @@ export const AdminAppointmentsPage = () => {
         </div>
 
         <div className="space-y-5">
-          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
-            <div className="flex items-center justify-between px-1 gap-3">
-              <h2 className="text-sm font-black text-slate-800 tracking-tight">
-                Appointments for {safeFormat(selectedDate, 'MMMM d, yyyy')}
-              </h2>
-              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
-                {filteredAppointments.length} Found
-              </span>
-            </div>
-          </div>
-
           {APPOINTMENT_AUDIENCE_SECTIONS.map((audienceSection) => renderAudienceSection(audienceSection))}
         </div>
       </motion.div>
