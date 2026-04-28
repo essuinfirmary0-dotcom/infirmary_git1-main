@@ -6,9 +6,10 @@ import { appointmentService } from '../services/appointmentService';
 import { profileService } from '../services/profileService';
 import { departmentService } from '../services/departmentService';
 import 'react-calendar/dist/Calendar.css';
-import { format, isBefore, startOfDay, getDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
+import { format, isBefore, startOfDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
 import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, X, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { APPOINTMENT_BOOKING_BLOCKED_DAY_MESSAGE, isInfirmaryClosedOnDate } from '../utils/appointmentCalendar';
 
 const safeFormat = (date, formatStr) => {
   if (!date) return 'N/A';
@@ -211,11 +212,6 @@ const getDefaultSubcategoryForService = (service) => {
 
 const supportsRequirementUploads = (service, subcategory) =>
   service === 'Medical' && subcategory === 'Certification';
-
-const isInfirmaryClosedOnDate = (d) => {
-  const day = getDay(d);
-  return day === 0 || day === 5 || day === 6; // Sunday, Friday, and Saturday
-};
 
 const getCurrentSystemDate = (baseDate = new Date()) => startOfDay(baseDate);
 
@@ -875,6 +871,10 @@ export const BookingForm = ({
       classNames.push('booking-calendar__tile--today');
     }
 
+    if (isInfirmaryClosedOnDate(calendarDate)) {
+      classNames.push('booking-calendar__tile--closed');
+    }
+
     if (isBefore(calendarDate, todayDate)) {
       classNames.push('booking-calendar__tile--past');
     }
@@ -964,7 +964,7 @@ export const BookingForm = ({
       return;
     }
     if (isInfirmaryClosedOnDate(date)) {
-      toast.error('The infirmary is closed on this day. Please select an open day from Monday to Thursday.');
+      toast.error('Friday, Saturday, and Sunday are unavailable for booking. Please select a Monday to Thursday appointment date.');
       return;
     }
 
@@ -1098,7 +1098,7 @@ export const BookingForm = ({
               {isClosedDate ? (
                 <div className="mt-4 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 p-3 rounded-xl border border-amber-100">
                   <AlertCircle size={14} />
-                  Infirmary is closed on Friday and weekends.
+                  {APPOINTMENT_BOOKING_BLOCKED_DAY_MESSAGE}
                 </div>
               ) : (
                 <div className="space-y-5">

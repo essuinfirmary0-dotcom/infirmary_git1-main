@@ -963,6 +963,29 @@ function getCurrentMinutesInManila(date = new Date()) {
   return (parts.hour * 60) + parts.minute;
 }
 
+function getAppointmentWeekday(dateValue) {
+  const match = String(dateValue || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.getUTCDay();
+}
+
+function isInfirmaryClosedOnAppointmentDate(dateValue) {
+  const weekday = getAppointmentWeekday(dateValue);
+  return weekday === 0 || weekday === 5 || weekday === 6;
+}
+
 function parseClockToMinutes(value) {
   const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if (!match) {
@@ -3326,6 +3349,11 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
   if (!isValidAppointmentService(service)) {
     return res.status(400).json({ message: 'Invalid appointment service selected.' });
   }
+  if (isInfirmaryClosedOnAppointmentDate(date)) {
+    return res.status(400).json({
+      message: 'Friday, Saturday, and Sunday are unavailable for booking. Please select a Monday to Thursday appointment date.',
+    });
+  }
   if (!isValidAppointmentSubcategory(service, subcategory)) {
     return res.status(400).json({
       message: `${service} appointments only support ${getAllowedAppointmentSubcategories(service).join(' or ')}.`,
@@ -3483,6 +3511,11 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
   }
   if (!isValidAppointmentService(service)) {
     return res.status(400).json({ message: 'Invalid appointment service selected.' });
+  }
+  if (isInfirmaryClosedOnAppointmentDate(date)) {
+    return res.status(400).json({
+      message: 'Friday, Saturday, and Sunday are unavailable for booking. Please select a Monday to Thursday appointment date.',
+    });
   }
   if (!isValidAppointmentSubcategory(service, subcategory)) {
     return res.status(400).json({

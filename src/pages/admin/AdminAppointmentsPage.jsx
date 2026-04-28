@@ -7,6 +7,7 @@ import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, Clipboard
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
+import { isInfirmaryClosedOnDate } from '../../utils/appointmentCalendar';
 import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
 
@@ -16,8 +17,8 @@ const SORT_OPTIONS = [
 ];
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'active', label: 'Active' },
   { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
   { value: 'approved', label: 'Approved' },
   { value: 'confirmed', label: getAppointmentStatusLabel('Confirmed') },
   { value: 'completed', label: 'Completed' },
@@ -283,7 +284,7 @@ export const AdminAppointmentsPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [filterService, setFilterService] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [appointmentSearchQuery, setAppointmentSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [sortOrder, setSortOrder] = useState('oldest');
@@ -359,6 +360,26 @@ export const AdminAppointmentsPage = () => {
     [appointmentsBySession],
   );
 
+  const isSelectedDateBlocked = isInfirmaryClosedOnDate(selectedDate);
+
+  const getCalendarTileClassName = ({ date: calendarDate, view }) => {
+    if (view !== 'month') {
+      return null;
+    }
+
+    const classNames = [];
+
+    if (isSameDay(calendarDate, new Date())) {
+      classNames.push('booking-calendar__tile--today');
+    }
+
+    if (isInfirmaryClosedOnDate(calendarDate)) {
+      classNames.push('booking-calendar__tile--closed');
+    }
+
+    return classNames.join(' ') || null;
+  };
+
   useEffect(() => {
     const focusId = location.state?.focusAppointmentId;
     if (!focusId) return;
@@ -373,7 +394,7 @@ export const AdminAppointmentsPage = () => {
 
   const resetFilters = () => {
     setFilterService('All');
-    setStatusFilter('active');
+    setStatusFilter('all');
     setAppointmentSearchQuery('');
     setSelectedDate(startOfDay(new Date()));
     setSortOrder('oldest');
@@ -508,7 +529,8 @@ export const AdminAppointmentsPage = () => {
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 sm:p-4">
               <div className="mb-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Appointment Calendar</p>
-                <p className="mt-1 text-xs text-slate-500 font-medium">Pick any past, current, or future date to view that day’s schedule.</p>
+                <p className="mt-1 text-xs text-slate-500 font-medium">Pick any past, current, or future date to view that day's schedule.</p>
+                <p className="mt-2 text-xs font-semibold text-amber-700">Friday, Saturday, and Sunday are blocked for scheduling, but admins can still open those dates to review records.</p>
               </div>
               <ReactCalendar
                 onChange={(nextValue) => {
@@ -520,6 +542,7 @@ export const AdminAppointmentsPage = () => {
                   setSelectedDate(normalizeCalendarDate(nextDate));
                 }}
                 value={selectedDate}
+                tileClassName={getCalendarTileClassName}
                 className="rounded-xl border-none w-full max-w-full"
               />
             </div>
@@ -530,11 +553,22 @@ export const AdminAppointmentsPage = () => {
                 <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="text-lg font-black text-slate-900">{safeFormat(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
-                    <p className="text-xs text-slate-500 font-medium">Appointments are grouped below by session for this selected day.</p>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {isSelectedDateBlocked
+                        ? 'This date is blocked for new bookings, but admin records for the day remain visible below.'
+                        : 'Appointments are grouped below by session for this selected day.'}
+                    </p>
                   </div>
-                  <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
-                    {filteredAppointments.length} Found
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isSelectedDateBlocked && (
+                      <span className="inline-flex w-fit rounded-full bg-amber-50 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-amber-700 border border-amber-200">
+                        Blocked for Booking
+                      </span>
+                    )}
+                    <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
+                      {filteredAppointments.length} Found
+                    </span>
+                  </div>
                 </div>
               </div>
 
