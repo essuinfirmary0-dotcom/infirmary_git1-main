@@ -26,6 +26,13 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'cancelled', label: getAppointmentStatusLabel('Cancelled') },
 ];
 
+const SERVICE_FILTER_OPTIONS = [
+  { value: 'All', label: 'All Services' },
+  { value: 'Medical', label: 'Medical' },
+  { value: 'Dental', label: 'Dental' },
+  { value: 'Nutrition', label: 'Nutrition' },
+];
+
 const APPOINTMENT_SESSION_SECTIONS = [
   { key: 'morning', label: 'Morning Session' },
   { key: 'afternoon', label: 'Afternoon Session' },
@@ -37,15 +44,16 @@ const APPOINTMENT_AUDIENCE_SECTIONS = [
     key: 'guest',
     label: 'GUEST',
     title: 'Guest Appointments',
-    description: 'Guest appointments for the selected calendar date filtered by the guest-only controls above.',
+    description: 'Session, status, and service filters in this panel apply to guest appointments only.',
   },
   {
     key: 'student',
-    label: 'STUDENTS',
+    label: 'STUDENT APPOINTMENTS',
     title: 'Student Appointments',
-    description: 'Student appointments for the selected calendar date. The shared session view also applies here, while status and service stay guest-only.',
+    description: 'Session, status, and service filters in this panel apply to student appointments only.',
   },
 ];
+const GUEST_APPOINTMENT_SECTION = APPOINTMENT_AUDIENCE_SECTIONS.find((section) => section.key === 'guest');
 const STUDENT_APPOINTMENT_SECTION = APPOINTMENT_AUDIENCE_SECTIONS.find((section) => section.key === 'student');
 
 const toDate = (value) => {
@@ -396,11 +404,14 @@ export const AdminAppointmentsPage = () => {
   const { appointments } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
-  const [filterService, setFilterService] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [guestFilterService, setGuestFilterService] = useState('All');
+  const [guestStatusFilter, setGuestStatusFilter] = useState('all');
+  const [guestSessionFilter, setGuestSessionFilter] = useState('all');
+  const [studentFilterService, setStudentFilterService] = useState('All');
+  const [studentStatusFilter, setStudentStatusFilter] = useState('all');
+  const [studentSessionFilter, setStudentSessionFilter] = useState('all');
   const [appointmentSearchQuery, setAppointmentSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
-  const [sessionFilter, setSessionFilter] = useState('all');
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [viewMode, setViewMode] = useState('list');
 
@@ -441,14 +452,14 @@ export const AdminAppointmentsPage = () => {
   const filteredGuestAppointments = useMemo(
     () => (
       guestAppointmentsForSelectedDate.filter((appointment) => {
-        const matchesService = filterService === 'All' || appointment.service === filterService;
-        const matchesStatus = matchesStatusFilter(appointment, statusFilter);
-        const matchesSession = matchesSessionFilter(appointment, sessionFilter);
+        const matchesService = guestFilterService === 'All' || appointment.service === guestFilterService;
+        const matchesStatus = matchesStatusFilter(appointment, guestStatusFilter);
+        const matchesSession = matchesSessionFilter(appointment, guestSessionFilter);
 
         return matchesService && matchesStatus && matchesSession;
       })
     ),
-    [guestAppointmentsForSelectedDate, filterService, statusFilter, sessionFilter],
+    [guestAppointmentsForSelectedDate, guestFilterService, guestStatusFilter, guestSessionFilter],
   );
 
   const guestAppointmentsBySession = useMemo(
@@ -458,9 +469,15 @@ export const AdminAppointmentsPage = () => {
 
   const filteredStudentAppointments = useMemo(
     () => (
-      studentAppointmentsForSelectedDate.filter((appointment) => matchesSessionFilter(appointment, sessionFilter))
+      studentAppointmentsForSelectedDate.filter((appointment) => {
+        const matchesService = studentFilterService === 'All' || appointment.service === studentFilterService;
+        const matchesStatus = matchesStatusFilter(appointment, studentStatusFilter);
+        const matchesSession = matchesSessionFilter(appointment, studentSessionFilter);
+
+        return matchesService && matchesStatus && matchesSession;
+      })
     ),
-    [studentAppointmentsForSelectedDate, sessionFilter],
+    [studentAppointmentsForSelectedDate, studentFilterService, studentStatusFilter, studentSessionFilter],
   );
 
   const studentAppointmentsBySession = useMemo(
@@ -468,13 +485,22 @@ export const AdminAppointmentsPage = () => {
     [filteredStudentAppointments],
   );
 
-  const visibleSessionSections = useMemo(
+  const guestVisibleSessionSections = useMemo(
     () => (
-      sessionFilter === 'all'
+      guestSessionFilter === 'all'
         ? APPOINTMENT_SESSION_SECTIONS
-        : APPOINTMENT_SESSION_SECTIONS.filter((section) => section.key === sessionFilter)
+        : APPOINTMENT_SESSION_SECTIONS.filter((section) => section.key === guestSessionFilter)
     ),
-    [sessionFilter],
+    [guestSessionFilter],
+  );
+
+  const studentVisibleSessionSections = useMemo(
+    () => (
+      studentSessionFilter === 'all'
+        ? APPOINTMENT_SESSION_SECTIONS
+        : APPOINTMENT_SESSION_SECTIONS.filter((section) => section.key === studentSessionFilter)
+    ),
+    [studentSessionFilter],
   );
 
   const isSelectedDateBlocked = isInfirmaryClosedOnDate(selectedDate);
@@ -510,11 +536,14 @@ export const AdminAppointmentsPage = () => {
   }, [location.state, appointments, navigate, location.pathname]);
 
   const resetFilters = () => {
-    setFilterService('All');
-    setStatusFilter('all');
+    setGuestFilterService('All');
+    setGuestStatusFilter('all');
+    setGuestSessionFilter('all');
+    setStudentFilterService('All');
+    setStudentStatusFilter('all');
+    setStudentSessionFilter('all');
     setAppointmentSearchQuery('');
     setSelectedDate(startOfDay(new Date()));
-    setSessionFilter('all');
   };
 
   const renderAppointmentCard = (appointment) => {
@@ -678,7 +707,7 @@ export const AdminAppointmentsPage = () => {
   );
 
   const renderGuestResults = () => {
-    if (sessionFilter === 'all') {
+    if (guestSessionFilter === 'all') {
       return renderResultSection({
         title: 'Appointment Results',
         appointments: filteredGuestAppointments,
@@ -690,13 +719,13 @@ export const AdminAppointmentsPage = () => {
       });
     }
 
-    return renderSessionGroups(guestAppointmentsBySession, visibleSessionSections, {
+    return renderSessionGroups(guestAppointmentsBySession, guestVisibleSessionSections, {
       scrollable: true,
     });
   };
 
   const renderStudentResults = () => {
-    if (sessionFilter === 'all') {
+    if (studentSessionFilter === 'all') {
       return renderResultSection({
         title: 'Appointment Results',
         appointments: filteredStudentAppointments,
@@ -708,34 +737,109 @@ export const AdminAppointmentsPage = () => {
       });
     }
 
-    return renderSessionGroups(studentAppointmentsBySession, visibleSessionSections, {
+    return renderSessionGroups(studentAppointmentsBySession, studentVisibleSessionSections, {
       scrollable: true,
     });
   };
 
-  const renderAudienceSection = (audienceSection) => {
-    const isGuestSection = audienceSection.key === 'guest';
-    const audienceAppointments = isGuestSection ? filteredGuestAppointments : filteredStudentAppointments;
-
-    return (
-      <div key={audienceSection.key} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-4 px-1 gap-3">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{audienceSection.label}</p>
-            <h2 className="text-sm font-black text-slate-800 tracking-tight mt-1">
-              {audienceSection.title} for {safeFormat(selectedDate, 'MMMM d, yyyy')}
-            </h2>
-            <p className="text-xs text-slate-500 font-medium mt-1">{audienceSection.description}</p>
-          </div>
-          <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
-            {audienceAppointments.length} Found
-          </span>
-        </div>
-
-        {isGuestSection ? renderGuestResults() : renderStudentResults()}
+  const renderAudienceFilterControls = ({
+    sessionValue,
+    onSessionChange,
+    statusValue,
+    onStatusChange,
+    serviceValue,
+    onServiceChange,
+  }) => (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="space-y-1.5 flex flex-col">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Session</label>
+        <select
+          value={sessionValue}
+          onChange={(e) => onSessionChange(e.target.value)}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+        >
+          {SESSION_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
       </div>
-    );
-  };
+
+      <div className="space-y-1.5 flex flex-col">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>
+        <select
+          value={statusValue}
+          onChange={(e) => onStatusChange(e.target.value)}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+        >
+          {STATUS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5 flex flex-col">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service</label>
+        <select
+          value={serviceValue}
+          onChange={(e) => onServiceChange(e.target.value)}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
+        >
+          {SERVICE_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+
+  const renderAudiencePanel = ({
+    section,
+    appointments,
+    results,
+    sessionValue,
+    onSessionChange,
+    statusValue,
+    onStatusChange,
+    serviceValue,
+    onServiceChange,
+  }) => (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{section.label}</p>
+        <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-lg font-black text-slate-900">{safeFormat(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
+            <p className="text-xs text-slate-500 font-medium">
+              {isSelectedDateBlocked
+                ? `This date is blocked for new bookings, but ${section.title.toLowerCase()} records for the day remain visible below.`
+                : section.description}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isSelectedDateBlocked && (
+              <span className="inline-flex w-fit rounded-full bg-amber-50 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-amber-700 border border-amber-200">
+                Blocked for Booking
+              </span>
+            )}
+            <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
+              {appointments.length} Found
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {renderAudienceFilterControls({
+        sessionValue,
+        onSessionChange,
+        statusValue,
+        onStatusChange,
+        serviceValue,
+        onServiceChange,
+      })}
+
+      {results}
+    </div>
+  );
 
   return (
     <>
@@ -821,80 +925,36 @@ export const AdminAppointmentsPage = () => {
               />
             </div>
 
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">GUEST APPOINTMENTS</p>
-                <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="text-lg font-black text-slate-900">{safeFormat(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {isSelectedDateBlocked
-                        ? 'This date is blocked for new bookings, but guest appointment records for the day remain visible below.'
-                        : 'Status and service filters in this panel apply to guest appointments only. Session also changes the student section below.'}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {isSelectedDateBlocked && (
-                      <span className="inline-flex w-fit rounded-full bg-amber-50 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-amber-700 border border-amber-200">
-                        Blocked for Booking
-                      </span>
-                    )}
-                    <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500 border border-slate-200">
-                      {filteredGuestAppointments.length} Found
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Session</label>
-                  <select
-                    value={sessionFilter}
-                    onChange={(e) => setSessionFilter(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-                  >
-                    {SESSION_FILTER_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-                  >
-                    {STATUS_FILTER_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service</label>
-                  <select
-                    value={filterService}
-                    onChange={(e) => setFilterService(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
-                  >
-                    <option value="All">All Services</option>
-                    <option value="Medical">Medical</option>
-                    <option value="Dental">Dental</option>
-                    <option value="Nutrition">Nutrition</option>
-                  </select>
-                </div>
-              </div>
-
-              {renderGuestResults()}
-            </div>
+            {GUEST_APPOINTMENT_SECTION && renderAudiencePanel({
+              section: GUEST_APPOINTMENT_SECTION,
+              appointments: filteredGuestAppointments,
+              results: renderGuestResults(),
+              sessionValue: guestSessionFilter,
+              onSessionChange: setGuestSessionFilter,
+              statusValue: guestStatusFilter,
+              onStatusChange: setGuestStatusFilter,
+              serviceValue: guestFilterService,
+              onServiceChange: setGuestFilterService,
+            })}
           </div>
         </div>
 
         <div className="space-y-5">
-          {STUDENT_APPOINTMENT_SECTION && renderAudienceSection(STUDENT_APPOINTMENT_SECTION)}
+          {STUDENT_APPOINTMENT_SECTION && (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              {renderAudiencePanel({
+                section: STUDENT_APPOINTMENT_SECTION,
+                appointments: filteredStudentAppointments,
+                results: renderStudentResults(),
+                sessionValue: studentSessionFilter,
+                onSessionChange: setStudentSessionFilter,
+                statusValue: studentStatusFilter,
+                onStatusChange: setStudentStatusFilter,
+                serviceValue: studentFilterService,
+                onServiceChange: setStudentFilterService,
+              })}
+            </div>
+          )}
         </div>
       </motion.div>
     </>

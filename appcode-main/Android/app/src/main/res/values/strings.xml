@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">InfirmaryKiosk</string>
+    <string name="kiosk_url">https://essu-infirmary-connect.vercel.app/kiosk</string>
+</resources>
