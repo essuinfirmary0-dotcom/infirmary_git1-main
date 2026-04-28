@@ -30,7 +30,7 @@ const APPOINTMENT_SESSION_SECTIONS = [
   { key: 'morning', label: 'Morning Session' },
   { key: 'afternoon', label: 'Afternoon Session' },
 ];
-const GUEST_VISIBLE_RESULT_COUNT = 3;
+const COMPACT_VISIBLE_RESULT_COUNT = 3;
 
 const APPOINTMENT_AUDIENCE_SECTIONS = [
   {
@@ -43,7 +43,7 @@ const APPOINTMENT_AUDIENCE_SECTIONS = [
     key: 'student',
     label: 'STUDENTS',
     title: 'Student Appointments',
-    description: 'Student appointments for the selected calendar date. Guest filters do not change this section.',
+    description: 'Student appointments for the selected calendar date. The shared session view also applies here, while status and service stay guest-only.',
   },
 ];
 const STUDENT_APPOINTMENT_SECTION = APPOINTMENT_AUDIENCE_SECTIONS.find((section) => section.key === 'student');
@@ -456,12 +456,19 @@ export const AdminAppointmentsPage = () => {
     [filteredGuestAppointments],
   );
 
-  const studentAppointmentsBySession = useMemo(
-    () => buildAppointmentsBySession(studentAppointmentsForSelectedDate),
-    [studentAppointmentsForSelectedDate],
+  const filteredStudentAppointments = useMemo(
+    () => (
+      studentAppointmentsForSelectedDate.filter((appointment) => matchesSessionFilter(appointment, sessionFilter))
+    ),
+    [studentAppointmentsForSelectedDate, sessionFilter],
   );
 
-  const guestVisibleSessionSections = useMemo(
+  const studentAppointmentsBySession = useMemo(
+    () => buildAppointmentsBySession(filteredStudentAppointments),
+    [filteredStudentAppointments],
+  );
+
+  const visibleSessionSections = useMemo(
     () => (
       sessionFilter === 'all'
         ? APPOINTMENT_SESSION_SECTIONS
@@ -677,22 +684,38 @@ export const AdminAppointmentsPage = () => {
         appointments: filteredGuestAppointments,
         emptyMessage: 'No guest appointments found for the selected filters.',
         description: filteredGuestAppointments.length > 0
-          ? `${Math.min(filteredGuestAppointments.length, GUEST_VISIBLE_RESULT_COUNT)} of ${filteredGuestAppointments.length} appointment${filteredGuestAppointments.length === 1 ? '' : 's'} visible`
+          ? `${Math.min(filteredGuestAppointments.length, COMPACT_VISIBLE_RESULT_COUNT)} of ${filteredGuestAppointments.length} appointment${filteredGuestAppointments.length === 1 ? '' : 's'} visible`
           : 'No guest appointments match the selected filters.',
-        scrollable: filteredGuestAppointments.length > GUEST_VISIBLE_RESULT_COUNT,
+        scrollable: filteredGuestAppointments.length > COMPACT_VISIBLE_RESULT_COUNT,
       });
     }
 
-    return renderSessionGroups(guestAppointmentsBySession, guestVisibleSessionSections, {
+    return renderSessionGroups(guestAppointmentsBySession, visibleSessionSections, {
+      scrollable: true,
+    });
+  };
+
+  const renderStudentResults = () => {
+    if (sessionFilter === 'all') {
+      return renderResultSection({
+        title: 'Appointment Results',
+        appointments: filteredStudentAppointments,
+        emptyMessage: 'No student appointments found for the selected date.',
+        description: filteredStudentAppointments.length > 0
+          ? `${Math.min(filteredStudentAppointments.length, COMPACT_VISIBLE_RESULT_COUNT)} of ${filteredStudentAppointments.length} appointment${filteredStudentAppointments.length === 1 ? '' : 's'} visible`
+          : 'No student appointments found for the selected date.',
+        scrollable: filteredStudentAppointments.length > COMPACT_VISIBLE_RESULT_COUNT,
+      });
+    }
+
+    return renderSessionGroups(studentAppointmentsBySession, visibleSessionSections, {
       scrollable: true,
     });
   };
 
   const renderAudienceSection = (audienceSection) => {
     const isGuestSection = audienceSection.key === 'guest';
-    const audienceAppointments = isGuestSection ? filteredGuestAppointments : studentAppointmentsForSelectedDate;
-    const appointmentsBySession = isGuestSection ? guestAppointmentsBySession : studentAppointmentsBySession;
-    const sessionSections = isGuestSection ? guestVisibleSessionSections : APPOINTMENT_SESSION_SECTIONS;
+    const audienceAppointments = isGuestSection ? filteredGuestAppointments : filteredStudentAppointments;
 
     return (
       <div key={audienceSection.key} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
@@ -709,7 +732,7 @@ export const AdminAppointmentsPage = () => {
           </span>
         </div>
 
-        {renderSessionGroups(appointmentsBySession, sessionSections)}
+        {isGuestSection ? renderGuestResults() : renderStudentResults()}
       </div>
     );
   };
@@ -807,7 +830,7 @@ export const AdminAppointmentsPage = () => {
                     <p className="text-xs text-slate-500 font-medium">
                       {isSelectedDateBlocked
                         ? 'This date is blocked for new bookings, but guest appointment records for the day remain visible below.'
-                        : 'Session, status, and service filters in this panel apply to guest appointments only.'}
+                        : 'Status and service filters in this panel apply to guest appointments only. Session also changes the student section below.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
