@@ -45,6 +45,7 @@ const APPOINTMENT_AUDIENCE_SECTIONS = [
     description: 'Student appointments for the selected calendar date. Guest filters do not change this section.',
   },
 ];
+const STUDENT_APPOINTMENT_SECTION = APPOINTMENT_AUDIENCE_SECTIONS.find((section) => section.key === 'student');
 
 const toDate = (value) => {
   if (!value) return null;
@@ -582,6 +583,46 @@ export const AdminAppointmentsPage = () => {
     );
   };
 
+  const renderSessionGroups = (appointmentsBySession, sessionSections) => (
+    <div className="space-y-5">
+      {sessionSections.map((sessionSection) => {
+        const sessionAppointments = appointmentsBySession[sessionSection.key] || [];
+
+        return (
+          <div key={sessionSection.key} className="rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">{sessionSection.label}</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {sessionAppointments.length > 0
+                    ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
+                    : 'No appointments in this session.'}
+                </p>
+              </div>
+              <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                {sessionAppointments.length}
+              </span>
+            </div>
+
+            {sessionAppointments.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
+                No appointments scheduled for the {sessionSection.label.toLowerCase()}.
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+                {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
+              </div>
+            ) : (
+              <div className="space-y-2 p-3">
+                {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   const renderAudienceSection = (audienceSection) => {
     const isGuestSection = audienceSection.key === 'guest';
     const audienceAppointments = isGuestSection ? filteredGuestAppointments : studentAppointmentsForSelectedDate;
@@ -603,43 +644,7 @@ export const AdminAppointmentsPage = () => {
           </span>
         </div>
 
-        <div className="space-y-5">
-          {sessionSections.map((sessionSection) => {
-            const sessionAppointments = appointmentsBySession[sessionSection.key] || [];
-
-            return (
-              <div key={`${audienceSection.key}-${sessionSection.key}`} className="rounded-2xl border border-slate-100 overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900">{sessionSection.label}</h3>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {sessionAppointments.length > 0
-                        ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
-                        : 'No appointments in this session.'}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
-                    {sessionAppointments.length}
-                  </span>
-                </div>
-
-                {sessionAppointments.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
-                    No appointments scheduled for the {sessionSection.label.toLowerCase()}.
-                  </div>
-                ) : viewMode === 'card' ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-                    {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
-                  </div>
-                ) : (
-                  <div className="space-y-2 p-3">
-                    {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        {renderSessionGroups(appointmentsBySession, sessionSections)}
       </div>
     );
   };
@@ -794,12 +799,14 @@ export const AdminAppointmentsPage = () => {
                   </select>
                 </div>
               </div>
+
+              {renderSessionGroups(guestAppointmentsBySession, guestVisibleSessionSections)}
             </div>
           </div>
         </div>
 
         <div className="space-y-5">
-          {APPOINTMENT_AUDIENCE_SECTIONS.map((audienceSection) => renderAudienceSection(audienceSection))}
+          {STUDENT_APPOINTMENT_SECTION && renderAudienceSection(STUDENT_APPOINTMENT_SECTION)}
         </div>
       </motion.div>
     </>
