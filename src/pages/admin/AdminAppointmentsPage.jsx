@@ -1,28 +1,49 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactCalendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import { isSameDay, parseISO, addDays, isSameWeek, isSameMonth, compareAsc, compareDesc, startOfDay, isValid } from 'date-fns';
+import { isSameDay, parseISO, addDays, isSameWeek, isSameMonth, startOfDay, isValid } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Trash2, CalendarDays, Clock, CheckCircle, XCircle, X, ClipboardList, Tag, FileText, User, Grid3x3, List, Building2, GraduationCap, IdCard } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { safeFormat } from '../../utils/dateUtils';
 import { isInfirmaryClosedOnDate } from '../../utils/appointmentCalendar';
-import { resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
+import { resolveKioskReceiptIdentity, resolveKioskReceiptProfile } from '../../utils/kioskReceiptIdentity';
 import { getAppointmentStatusLabel } from '../../utils/appointmentStatus';
+import { isGuestUser } from '../../utils/userIdentity';
 
-const SORT_OPTIONS = [
-  { value: 'oldest', label: 'Oldest First' },
-  { value: 'newest', label: 'Newest First' },
+const SESSION_FILTER_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'morning', label: 'Morning' },
+  { value: 'afternoon', label: 'Afternoon' },
 ];
 
 const STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'All' },
-  { value: 'active', label: 'Active' },
   { value: 'approved', label: 'Approved' },
   { value: 'confirmed', label: getAppointmentStatusLabel('Confirmed') },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: getAppointmentStatusLabel('Cancelled') },
+];
+
+const APPOINTMENT_SESSION_SECTIONS = [
+  { key: 'morning', label: 'Morning Session' },
+  { key: 'afternoon', label: 'Afternoon Session' },
+];
+
+const APPOINTMENT_AUDIENCE_SECTIONS = [
+  {
+    key: 'guest',
+    label: 'GUEST',
+    title: 'Guest Appointments',
+    description: 'Guest appointments for the selected calendar date.',
+  },
+  {
+    key: 'student',
+    label: 'STUDENTS',
+    title: 'Student Appointments',
+    description: 'Student appointments for the selected calendar date.',
+  },
 ];
 
 const toDate = (value) => {
@@ -50,10 +71,8 @@ const getAppointmentStatusKey = (status) => {
 };
 
 const matchesStatusFilter = (appointment, filterValue) => {
-  const statusKey = getAppointmentStatusKey(appointment?.status);
   if (filterValue === 'all') return true;
-  if (filterValue === 'active') return !['completed', 'cancelled'].includes(statusKey);
-  return statusKey === filterValue;
+  return getAppointmentStatusKey(appointment?.status) === filterValue;
 };
 
 const getStatusPriority = (status) => {
@@ -80,13 +99,6 @@ const matchesRelativeDateScope = (dateValue, scope) => {
   return true;
 };
 
-const APPOINTMENT_SESSION_SECTIONS = [
-  { key: 'morning', label: 'Morning Session', alwaysVisible: true },
-  { key: 'afternoon', label: 'Afternoon Session', alwaysVisible: true },
-  { key: 'night', label: 'Temporary Night Session', alwaysVisible: false },
-  { key: 'other', label: 'Other Schedule', alwaysVisible: false },
-];
-
 const parseClockToMinutes = (value) => {
   const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if (!match) return null;
@@ -108,19 +120,93 @@ const parseClockToMinutes = (value) => {
   return (hours * 60) + minutes;
 };
 
-const getAppointmentSessionKey = (timeValue) => {
+const getAppointmentTimeSortValue = (timeValue) => {
   const match = String(timeValue || '').trim().match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)/i);
-  if (!match) return 'other';
+  if (!match) return Number.POSITIVE_INFINITY;
+  return parseClockToMinutes(match[1]) ?? Number.POSITIVE_INFINITY;
+};
 
-  const startMinutes = parseClockToMinutes(match[1]);
-  if (startMinutes == null) return 'other';
-  if (startMinutes < 12 * 60) return 'morning';
-  if (startMinutes < 18 * 60) return 'afternoon';
-  return 'night';
+const getAppointmentSessionKey = (timeValue) => {
+  const startMinutes = getAppointmentTimeSortValue(timeValue);
+  return startMinutes < 12 * 60 ? 'morning' : 'afternoon';
+};
+
+const matchesSessionFilter = (appointment, filterValue) => {
+  if (filterValue === 'all') return true;
+  return getAppointmentSessionKey(appointment?.time) === filterValue;
+};
+
+const getUserTypeLabel = (userType) => {
+  const normalized = String(userType || '').trim().toLowerCase();
+  if (normalized === 'guest') return 'Guest';
+  if (['student', 'new', 'old'].includes(normalized)) return 'Student';
+  if (!normalized) return 'Not specified';
+  return normalized
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const getAppointmentAudienceKey = (appointment) => (
+  isGuestUser(appointment) ? 'guest' : 'student'
+);
+
+const buildAppointmentSearchIndex = (appointment) => {
+  const receiptIdentity = resolveKioskReceiptIdentity(appointment);
+
+  return [
+    appointment?.patientName,
+    appointment?.appointmentCode,
+    appointment?.service,
+    appointment?.subcategory,
+    appointment?.purpose,
+    appointment?.status,
+    appointment?.studentNumber,
+    appointment?.employeeNumber,
+    appointment?.idNumber,
+    receiptIdentity.value,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+};
+
+const compareAppointments = (left, right) => {
+  const statusComparison = getStatusPriority(left?.status) - getStatusPriority(right?.status);
+  if (statusComparison !== 0) return statusComparison;
+
+  const sessionPriority = {
+    morning: 0,
+    afternoon: 1,
+  };
+
+  const sessionComparison =
+    (sessionPriority[getAppointmentSessionKey(left?.time)] ?? 99) -
+    (sessionPriority[getAppointmentSessionKey(right?.time)] ?? 99);
+  if (sessionComparison !== 0) return sessionComparison;
+
+  const timeComparison = getAppointmentTimeSortValue(left?.time) - getAppointmentTimeSortValue(right?.time);
+  if (timeComparison !== 0) return timeComparison;
+
+  return String(left?.patientName || '').localeCompare(String(right?.patientName || ''));
+};
+
+const buildAppointmentsBySession = (appointments) => {
+  const groupedAppointments = {
+    morning: [],
+    afternoon: [],
+  };
+
+  appointments.forEach((appointment) => {
+    groupedAppointments[getAppointmentSessionKey(appointment.time)].push(appointment);
+  });
+
+  return groupedAppointments;
 };
 
 const AppointmentDetailModal = ({ appointment, onClose }) => {
   if (!appointment) return null;
+
   const {
     receiptIdentity,
     showCollege,
@@ -130,6 +216,14 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
     program,
     guestType,
   } = resolveKioskReceiptProfile(appointment);
+  const userTypeLabel = getUserTypeLabel(appointment.userType);
+  const remarks = [
+    String(appointment.notes || '').trim(),
+    String(appointment.cancellationReason || '').trim(),
+  ]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join('\n\n');
 
   return (
     <AnimatePresence>
@@ -138,12 +232,12 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
           initial={{ opacity: 0, scale: 0.96, y: 16 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 16 }}
-          className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl overflow-hidden"
+          className="w-full max-w-3xl bg-white rounded-[2rem] shadow-2xl overflow-hidden"
         >
           <div className="flex items-center justify-between p-5 sm:p-6 border-b border-slate-100 bg-slate-50">
             <div>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900">Appointment Details</h2>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">View the complete schedule information for this appointment.</p>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">Review the full patient and appointment information.</p>
             </div>
             <button
               type="button"
@@ -155,46 +249,49 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
           </div>
 
           <div className="p-5 sm:p-6 space-y-5">
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Patient</p>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-primary">
-                      <User size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{appointment.patientName || 'Anonymous'}</p>
-                      <p className="text-xs text-slate-500">Review the complete patient and booking details below.</p>
-                    </div>
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Patient</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-primary shrink-0">
+                    <User size={18} />
                   </div>
-                  {appointment.status && (
-                    <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
-                      {getAppointmentStatusLabel(appointment.status)}
-                    </span>
-                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-800 truncate">{appointment.patientName || 'Anonymous'}</p>
+                    <p className="text-xs text-slate-500">Tap outside this window or the close button to return to the appointment list.</p>
+                  </div>
+                </div>
+                {appointment.status && (
+                  <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
+                    {getAppointmentStatusLabel(appointment.status)}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200">
+                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Appointment Code</p>
+                  <p className="text-sm font-black text-primary">{appointment.appointmentCode || 'No code'}</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-200">
-                  <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Appointment Code</p>
-                    <p className="text-sm font-black text-primary">{appointment.appointmentCode || 'No code'}</p>
-                  </div>
+                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">User Type</p>
+                  <p className="text-sm font-black text-slate-800">{userTypeLabel}</p>
+                </div>
 
-                  {receiptIdentity.value && (
-                    <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                        <IdCard size={12} />
-                        {receiptIdentity.label}
-                      </p>
-                      <p className="text-sm font-black text-slate-800">{receiptIdentity.value}</p>
-                    </div>
-                  )}
-
+                {receiptIdentity.value && (
                   <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                    <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved')}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                      <IdCard size={12} />
+                      {receiptIdentity.label}
+                    </p>
+                    <p className="text-sm font-black text-slate-800">{receiptIdentity.value}</p>
                   </div>
+                )}
+
+                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                  <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved')}</p>
                 </div>
               </div>
             </div>
@@ -215,7 +312,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                   <div className="bg-white rounded-2xl p-4 border border-slate-100">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                       <GraduationCap size={12} />
-                      Department / Program
+                      Program / Department
                     </p>
                     <p className="text-sm font-black text-slate-800">{program}</p>
                   </div>
@@ -233,14 +330,21 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-white rounded-2xl p-4 border border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                   <CalendarDays size={12} />
-                  Schedule
+                  Date
                 </p>
                 <p className="text-sm font-black text-slate-800">{safeFormat(appointment.date, 'MMMM d, yyyy')}</p>
-                <p className="text-sm text-slate-600 font-semibold mt-1">{appointment.time}</p>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <Clock size={12} />
+                  Time
+                </p>
+                <p className="text-sm font-black text-slate-800">{appointment.time || 'No time provided'}</p>
               </div>
 
               <div className="bg-white rounded-2xl p-4 border border-slate-100">
@@ -248,28 +352,35 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                   <Tag size={12} />
                   Service
                 </p>
-                <p className="text-sm font-black text-slate-800">
-                  {appointment.service}
-                  {appointment.subcategory ? ` - ${appointment.subcategory}` : ''}
-                </p>
+                <p className="text-sm font-black text-slate-800">{appointment.service || 'No service provided'}</p>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-4 border border-slate-100">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                <ClipboardList size={12} />
-                Purpose
-              </p>
-              <p className="text-sm font-semibold text-slate-700">{appointment.purpose || 'No purpose provided'}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <Tag size={12} />
+                  Sub-category
+                </p>
+                <p className="text-sm font-black text-slate-800">{appointment.subcategory || 'No sub-category provided'}</p>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <ClipboardList size={12} />
+                  Purpose
+                </p>
+                <p className="text-sm font-semibold text-slate-700">{appointment.purpose || 'No purpose provided'}</p>
+              </div>
             </div>
 
-            {appointment.notes && (
+            {remarks && (
               <div className="bg-white rounded-2xl p-4 border border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                   <FileText size={12} />
-                  Notes
+                  Remarks
                 </p>
-                <p className="text-sm font-semibold text-slate-700">{appointment.notes}</p>
+                <p className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{remarks}</p>
               </div>
             )}
           </div>
@@ -287,7 +398,7 @@ export const AdminAppointmentsPage = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [appointmentSearchQuery, setAppointmentSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
-  const [sortOrder, setSortOrder] = useState('oldest');
+  const [sessionFilter, setSessionFilter] = useState('all');
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [viewMode, setViewMode] = useState('list');
 
@@ -300,64 +411,48 @@ export const AdminAppointmentsPage = () => {
   ]), [appointments]);
 
   const filteredAppointments = useMemo(() => {
+    const normalizedSearchQuery = appointmentSearchQuery.trim().toLowerCase();
+
     return [...appointments]
-      .filter((apt) => {
-        const matchesService = filterService === 'All' || apt.service === filterService;
-        const matchesStatus = matchesStatusFilter(apt, statusFilter);
+      .filter((appointment) => {
+        const matchesService = filterService === 'All' || appointment.service === filterService;
+        const matchesStatus = matchesStatusFilter(appointment, statusFilter);
         const matchesSearch =
-          appointmentSearchQuery.trim() === '' ||
-          (apt.patientName && apt.patientName.toLowerCase().includes(appointmentSearchQuery.toLowerCase())) ||
-          (apt.appointmentCode && apt.appointmentCode.toLowerCase().includes(appointmentSearchQuery.toLowerCase()));
-        const appointmentDate = toDate(apt.date);
+          normalizedSearchQuery === '' ||
+          buildAppointmentSearchIndex(appointment).includes(normalizedSearchQuery);
+        const appointmentDate = toDate(appointment.date);
         const matchesDate = appointmentDate ? isSameDay(appointmentDate, selectedDate) : false;
+        const matchesSession = matchesSessionFilter(appointment, sessionFilter);
 
-        return matchesService && matchesStatus && matchesSearch && matchesDate;
+        return matchesService && matchesStatus && matchesSearch && matchesDate && matchesSession;
       })
-      .sort((a, b) => {
-        const statusComparison = getStatusPriority(a.status) - getStatusPriority(b.status);
-        if (statusComparison !== 0) return statusComparison;
+      .sort(compareAppointments);
+  }, [appointments, filterService, statusFilter, appointmentSearchQuery, selectedDate, sessionFilter]);
 
-        const dateA = toDate(a.date);
-        const dateB = toDate(b.date);
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-        const dateComparison = sortOrder === 'oldest' ? compareAsc(dateA, dateB) : compareDesc(dateA, dateB);
-        if (dateComparison !== 0) return dateComparison;
-
-        const timeA = String(a.time || '');
-        const timeB = String(b.time || '');
-        return sortOrder === 'oldest' ? timeA.localeCompare(timeB) : timeB.localeCompare(timeA);
-      });
-  }, [appointments, filterService, statusFilter, appointmentSearchQuery, selectedDate, sortOrder]);
-
-  const appointmentsBySession = useMemo(() => {
-    const groupedAppointments = {
-      morning: [],
-      afternoon: [],
-      night: [],
-      other: [],
+  const appointmentsByAudience = useMemo(() => {
+    const grouped = {
+      guest: [],
+      student: [],
     };
 
     filteredAppointments.forEach((appointment) => {
-      const sessionKey = getAppointmentSessionKey(appointment.time);
-      if (!groupedAppointments[sessionKey]) {
-        groupedAppointments.other.push(appointment);
-        return;
-      }
-
-      groupedAppointments[sessionKey].push(appointment);
+      grouped[getAppointmentAudienceKey(appointment)].push(appointment);
     });
 
-    return groupedAppointments;
+    return grouped;
   }, [filteredAppointments]);
 
+  const appointmentsByAudienceAndSession = useMemo(() => ({
+    guest: buildAppointmentsBySession(appointmentsByAudience.guest),
+    student: buildAppointmentsBySession(appointmentsByAudience.student),
+  }), [appointmentsByAudience]);
   const visibleSessionSections = useMemo(
-    () =>
-      APPOINTMENT_SESSION_SECTIONS.filter(
-        (section) => section.alwaysVisible || (appointmentsBySession[section.key] || []).length > 0,
-      ),
-    [appointmentsBySession],
+    () => (
+      sessionFilter === 'all'
+        ? APPOINTMENT_SESSION_SECTIONS
+        : APPOINTMENT_SESSION_SECTIONS.filter((section) => section.key === sessionFilter)
+    ),
+    [sessionFilter],
   );
 
   const isSelectedDateBlocked = isInfirmaryClosedOnDate(selectedDate);
@@ -384,7 +479,7 @@ export const AdminAppointmentsPage = () => {
     const focusId = location.state?.focusAppointmentId;
     if (!focusId) return;
 
-    const target = appointments.find((apt) => apt.id === focusId);
+    const target = appointments.find((appointment) => appointment.id === focusId);
     if (target) {
       setSelectedAppointment(target);
       setSelectedDate(normalizeCalendarDate(target.date));
@@ -397,71 +492,142 @@ export const AdminAppointmentsPage = () => {
     setStatusFilter('all');
     setAppointmentSearchQuery('');
     setSelectedDate(startOfDay(new Date()));
-    setSortOrder('oldest');
+    setSessionFilter('all');
   };
 
-  const renderAppointmentCard = (appointment) => (
-    <button
-      key={appointment.id}
-      type="button"
-      onClick={() => setSelectedAppointment(appointment)}
-      className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
-    >
-      <div className="flex items-start gap-3">
-        <div className="w-11 h-11 bg-white rounded-xl flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
-          <span className="text-[8px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
-          <span className="text-sm font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
-        </div>
-      </div>
-      <div className="min-w-0">
-        <h4 className="text-sm font-black text-slate-800 leading-tight truncate">{appointment.patientName || 'Anonymous'}</h4>
-        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-          <span className="text-[10px] font-black text-primary uppercase">{appointment.appointmentCode}</span>
-          <span className="text-[10px] text-slate-400">|</span>
-          <span className="text-[10px] text-slate-500 font-bold">{appointment.time}</span>
-          <span className="text-[10px] text-slate-400">|</span>
-          <span className="text-[10px] text-slate-500 font-bold">{appointment.service}</span>
-        </div>
-        <p className="text-xs text-slate-600 font-semibold mt-2 truncate">
-          {appointment.purpose || 'No purpose provided'}
-        </p>
-        {appointment.notes && (
-          <p className="text-xs text-slate-500 mt-1 line-clamp-2 whitespace-pre-wrap">
-            {appointment.notes}
-          </p>
-        )}
-      </div>
-    </button>
-  );
+  const renderAppointmentCard = (appointment) => {
+    const receiptIdentity = resolveKioskReceiptIdentity(appointment);
 
-  const renderAppointmentListRow = (appointment) => (
-    <button
-      key={appointment.id}
-      type="button"
-      onClick={() => setSelectedAppointment(appointment)}
-      className="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
-    >
-      <div className="flex items-center gap-4 flex-1 min-w-0">
-        <div className="w-10 h-10 bg-white rounded-lg flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
-          <span className="text-[7px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
-          <span className="text-xs font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
+    return (
+      <button
+        key={appointment.id}
+        type="button"
+        onClick={() => setSelectedAppointment(appointment)}
+        className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-4 group hover:bg-white hover:shadow-md transition-all text-left"
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 bg-white rounded-xl flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
+            <span className="text-[8px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
+            <span className="text-sm font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-black text-slate-800 truncate">{appointment.patientName || 'Anonymous'}</h4>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
+        <div className="min-w-0">
+          <h4 className="text-sm font-black text-slate-800 leading-tight truncate">{appointment.patientName || 'Anonymous'}</h4>
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap text-[10px]">
             <span className="font-black text-primary uppercase">{appointment.appointmentCode}</span>
             <span className="text-slate-400">|</span>
             <span className="text-slate-500 font-bold">{appointment.time}</span>
             <span className="text-slate-400">|</span>
             <span className="text-slate-500 font-bold">{appointment.service}</span>
           </div>
-          <p className="text-[11px] text-slate-600 font-semibold mt-1 truncate">
+          <p className="text-xs text-slate-600 font-semibold mt-2 truncate">
             {appointment.purpose || 'No purpose provided'}
           </p>
+          <p className="text-[11px] text-slate-500 font-semibold mt-1 truncate">
+            {getUserTypeLabel(appointment.userType)}
+            {receiptIdentity.value ? ` | ${receiptIdentity.value}` : ''}
+          </p>
+        </div>
+      </button>
+    );
+  };
+
+  const renderAppointmentListRow = (appointment) => {
+    const receiptIdentity = resolveKioskReceiptIdentity(appointment);
+
+    return (
+      <button
+        key={appointment.id}
+        type="button"
+        onClick={() => setSelectedAppointment(appointment)}
+        className="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:bg-white hover:border-primary/20 hover:shadow-sm transition-all flex items-center justify-between gap-4 text-left w-full group"
+      >
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+          <div className="w-10 h-10 bg-white rounded-lg flex flex-col items-center justify-center shadow-sm border border-slate-100 shrink-0">
+            <span className="text-[7px] font-black text-primary uppercase">{safeFormat(appointment.date, 'MMM')}</span>
+            <span className="text-xs font-black text-slate-800 leading-none">{safeFormat(appointment.date, 'dd')}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-black text-slate-800 truncate">{appointment.patientName || 'Anonymous'}</h4>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
+              <span className="font-black text-primary uppercase">{appointment.appointmentCode}</span>
+              <span className="text-slate-400">|</span>
+              <span className="text-slate-500 font-bold">{appointment.time}</span>
+              <span className="text-slate-400">|</span>
+              <span className="text-slate-500 font-bold">{appointment.service}</span>
+            </div>
+            <p className="text-[11px] text-slate-600 font-semibold mt-1 truncate">
+              {appointment.purpose || 'No purpose provided'}
+            </p>
+            <p className="text-[11px] text-slate-500 font-semibold mt-1 truncate">
+              {getUserTypeLabel(appointment.userType)}
+              {receiptIdentity.value ? ` | ${receiptIdentity.value}` : ''}
+            </p>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const renderAudienceSection = (audienceSection) => {
+    const audienceAppointments = appointmentsByAudience[audienceSection.key] || [];
+    const appointmentsBySession = appointmentsByAudienceAndSession[audienceSection.key] || buildAppointmentsBySession([]);
+
+    return (
+      <div key={audienceSection.key} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
+        <div className="flex items-center justify-between mb-4 px-1 gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{audienceSection.label}</p>
+            <h2 className="text-sm font-black text-slate-800 tracking-tight mt-1">
+              {audienceSection.title} for {safeFormat(selectedDate, 'MMMM d, yyyy')}
+            </h2>
+            <p className="text-xs text-slate-500 font-medium mt-1">{audienceSection.description}</p>
+          </div>
+          <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
+            {audienceAppointments.length} Found
+          </span>
+        </div>
+
+        <div className="space-y-5">
+          {visibleSessionSections.map((sessionSection) => {
+            const sessionAppointments = appointmentsBySession[sessionSection.key] || [];
+
+            return (
+              <div key={`${audienceSection.key}-${sessionSection.key}`} className="rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">{sessionSection.label}</h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {sessionAppointments.length > 0
+                        ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
+                        : 'No appointments in this session.'}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                    {sessionAppointments.length}
+                  </span>
+                </div>
+
+                {sessionAppointments.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
+                    No appointments scheduled for the {sessionSection.label.toLowerCase()}.
+                  </div>
+                ) : viewMode === 'card' ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+                    {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
+                  </div>
+                ) : (
+                  <div className="space-y-2 p-3">
+                    {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
-    </button>
-  );
+    );
+  };
 
   return (
     <>
@@ -471,14 +637,14 @@ export const AdminAppointmentsPage = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">Appointments</h1>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium">Browse appointments by calendar date, then review each session for that day.</p>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">Browse appointments by calendar date, then review guest and student sessions for that day.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <div className="relative group min-w-0 flex-1 sm:flex-initial sm:min-w-[220px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" size={18} />
                 <input
                   type="text"
-                  placeholder="Search name or ticket..."
+                  placeholder="Search name, ticket, or ID..."
                   value={appointmentSearchQuery}
                   onChange={(e) => setAppointmentSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary transition-all font-medium text-slate-800 text-sm"
@@ -556,7 +722,7 @@ export const AdminAppointmentsPage = () => {
                     <p className="text-xs text-slate-500 font-medium">
                       {isSelectedDateBlocked
                         ? 'This date is blocked for new bookings, but admin records for the day remain visible below.'
-                        : 'Appointments are grouped below by session for this selected day.'}
+                        : 'Guest and student appointments are grouped below by session for this selected day.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -574,13 +740,13 @@ export const AdminAppointmentsPage = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Order</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Session</label>
                   <select
-                    value={sortOrder}
-                    onChange={(e) => setSortOrder(e.target.value)}
+                    value={sessionFilter}
+                    onChange={(e) => setSessionFilter(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:border-primary transition-all font-bold text-slate-800 text-sm"
                   >
-                    {SORT_OPTIONS.map((option) => (
+                    {SESSION_FILTER_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
@@ -617,58 +783,19 @@ export const AdminAppointmentsPage = () => {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4 px-1 gap-3">
-            <h2 className="text-sm font-black text-slate-800 tracking-tight">
-              Appointments for {safeFormat(selectedDate, 'MMMM d, yyyy')}
-            </h2>
-            <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
-              {filteredAppointments.length} Found
-            </span>
+        <div className="space-y-5">
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
+            <div className="flex items-center justify-between px-1 gap-3">
+              <h2 className="text-sm font-black text-slate-800 tracking-tight">
+                Appointments for {safeFormat(selectedDate, 'MMMM d, yyyy')}
+              </h2>
+              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase tracking-widest">
+                {filteredAppointments.length} Found
+              </span>
+            </div>
           </div>
-          {filteredAppointments.length === 0 ? (
-            <div className="text-center py-32">
-              <p className="text-slate-400 font-bold text-sm">No appointments found for the selected date.</p>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {visibleSessionSections.map((section) => {
-                const sessionAppointments = appointmentsBySession[section.key] || [];
 
-                return (
-                  <div key={section.key} className="rounded-2xl border border-slate-100 overflow-hidden">
-                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
-                      <div>
-                        <h3 className="text-sm font-black text-slate-900">{section.label}</h3>
-                        <p className="text-xs text-slate-500 font-medium">
-                          {sessionAppointments.length > 0
-                            ? `${sessionAppointments.length} appointment${sessionAppointments.length === 1 ? '' : 's'} scheduled`
-                            : 'No appointments in this session.'}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-white border border-slate-200 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-500">
-                        {sessionAppointments.length}
-                      </span>
-                    </div>
-
-                    {sessionAppointments.length === 0 ? (
-                      <div className="px-4 py-10 text-center text-sm font-semibold text-slate-400">
-                        No appointments scheduled for the {section.label.toLowerCase()}.
-                      </div>
-                    ) : viewMode === 'card' ? (
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-                        {sessionAppointments.map((appointment) => renderAppointmentCard(appointment))}
-                      </div>
-                    ) : (
-                      <div className="space-y-2 p-3">
-                        {sessionAppointments.map((appointment) => renderAppointmentListRow(appointment))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {APPOINTMENT_AUDIENCE_SECTIONS.map((audienceSection) => renderAudienceSection(audienceSection))}
         </div>
       </motion.div>
     </>
