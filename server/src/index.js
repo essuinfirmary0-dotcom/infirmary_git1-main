@@ -39,6 +39,9 @@ const isSupabaseStorageConfigured = Boolean(supabaseUrl && supabaseServiceRoleKe
 const PASSWORD_HASH_PREFIX = 'scrypt';
 const PASSWORD_HASH_KEY_LENGTH = 64;
 const PASSWORD_SALT_BYTES = 16;
+const APPOINTMENT_CODE_COUNTER_NAME = 'appointments';
+const APPOINTMENT_CODE_PAD_LENGTH = 5;
+const APPOINTMENT_CODE_RETRY_LIMIT = 5;
 
 fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -2131,16 +2134,66 @@ async function syncDefaultSlotDefinitions() {
   }
 }
 
+function formatAppointmentCode(number) {
+  const normalizedNumber = Number(number);
+  if (!Number.isSafeInteger(normalizedNumber) || normalizedNumber < 1) {
+    throw new Error('Invalid appointment code number generated.');
+  }
+
+  return `APT-${String(normalizedNumber).padStart(APPOINTMENT_CODE_PAD_LENGTH, '0')}`;
+}
+
+function isAppointmentCodeDuplicateError(error) {
+  return error?.code === '23505' && error?.constraint === 'appointments_appointment_code_key';
+}
+
+async function ensureAppointmentCodeTracking() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.appointment_code_counters (
+      counter_name text PRIMARY KEY,
+      last_number bigint NOT NULL DEFAULT 0 CHECK (last_number >= 0),
+      updated_at timestamp with time zone NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(
+    `
+      WITH latest_existing AS (
+        SELECT COALESCE(MAX(SUBSTRING(appointment_code FROM '^APT-([0-9]+)$')::bigint), 0) AS max_number
+        FROM public.appointments
+        WHERE appointment_code ~ '^APT-[0-9]+$'
+      )
+      INSERT INTO public.appointment_code_counters AS counter (counter_name, last_number)
+      SELECT $1, max_number
+      FROM latest_existing
+      ON CONFLICT (counter_name) DO UPDATE
+      SET last_number = GREATEST(counter.last_number, EXCLUDED.last_number),
+          updated_at = now()
+    `,
+    [APPOINTMENT_CODE_COUNTER_NAME],
+  );
+}
+
 async function generateAppointmentCode() {
   const { rows } = await pool.query(
     `
-      SELECT COUNT(*)::int AS total
-      FROM public.appointments
+      WITH latest_existing AS (
+        SELECT COALESCE(MAX(SUBSTRING(appointment_code FROM '^APT-([0-9]+)$')::bigint), 0) AS max_number
+        FROM public.appointments
+        WHERE appointment_code ~ '^APT-[0-9]+$'
+      )
+      INSERT INTO public.appointment_code_counters AS counter (counter_name, last_number)
+      SELECT $1, max_number + 1
+      FROM latest_existing
+      ON CONFLICT (counter_name) DO UPDATE
+      SET last_number = GREATEST(counter.last_number, EXCLUDED.last_number - 1) + 1,
+          updated_at = now()
+      RETURNING last_number
     `,
+    [APPOINTMENT_CODE_COUNTER_NAME],
   );
 
-  const nextNumber = (rows[0]?.total || 0) + 1;
-  return `APT-${String(nextNumber).padStart(5, '0')}`;
+  return formatAppointmentCode(rows[0]?.last_number);
 }
 
 function appendNotCompletedReason(existingNotes, reason) {
@@ -3424,56 +3477,76 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
       return res.status(409).json({ message: 'Selected time slot is already full.' });
     }
 
-    const appointmentCode = await generateAppointmentCode();
-    const client = await pool.connect();
     let insertedRow;
-    try {
-      await client.query('BEGIN');
+    let lastAppointmentCodeError = null;
 
-      const inserted = await client.query(
-        `
-          INSERT INTO public.appointments (
-            user_id,
-            appointment_code,
-            patient_name,
+    for (let attempt = 1; attempt <= APPOINTMENT_CODE_RETRY_LIMIT; attempt += 1) {
+      const appointmentCode = await generateAppointmentCode();
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        const inserted = await client.query(
+          `
+            INSERT INTO public.appointments (
+              user_id,
+              appointment_code,
+              patient_name,
+              service,
+              subcategory,
+              purpose,
+              appointment_date,
+              time_slot,
+              notes,
+              status,
+              slot_definition_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11)
+            RETURNING *
+          `,
+          [
+            req.authUser.id,
+            appointmentCode,
+            patientName,
             service,
             subcategory,
             purpose,
-            appointment_date,
-            time_slot,
+            date,
+            timeSlot,
             notes,
-            status,
-            slot_definition_id
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11)
-          RETURNING *
-        `,
-        [
-          req.authUser.id,
-          appointmentCode,
-          patientName,
-          service,
-          subcategory,
-          purpose,
-          date,
-          timeSlot,
-          notes,
-          initialStatus,
-          slotDefinition?.id || null,
-        ],
-      );
+            initialStatus,
+            slotDefinition?.id || null,
+          ],
+        );
 
-      insertedRow = inserted.rows[0];
-      if (attachments.length > 0) {
-        await replaceAppointmentAttachments(client, insertedRow.id, attachments);
+        insertedRow = inserted.rows[0];
+        if (attachments.length > 0) {
+          await replaceAppointmentAttachments(client, insertedRow.id, attachments);
+        }
+
+        await client.query('COMMIT');
+        lastAppointmentCodeError = null;
+        break;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        if (isAppointmentCodeDuplicateError(error)) {
+          lastAppointmentCodeError = error;
+          if (attempt < APPOINTMENT_CODE_RETRY_LIMIT) {
+            continue;
+          }
+          break;
+        }
+        throw error;
+      } finally {
+        client.release();
       }
+    }
 
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    if (!insertedRow && lastAppointmentCodeError) {
+      return res.status(409).json({
+        message: 'Failed to generate a unique appointment code. Please try again.',
+      });
     }
 
     await createNotification({
@@ -3484,32 +3557,39 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
       appointmentId: insertedRow.id,
     });
 
-   } catch (error) {
-  console.error("BOOKING ERROR - POST /api/appointments");
-  console.error("Request body:", req.body);
-  console.error("Authenticated user:", req.authUser || req.user);
-  console.error("Error message:", error.message);
-  console.error("Error code:", error.code);
-  console.error("Error constraint:", error.constraint);
-  console.error("Error detail:", error.detail);
-  console.error("Error table:", error.table);
-  console.error("Error column:", error.column);
-  console.error("Full error:", error);
+    return res.status(201).json(mapAppointmentRow(insertedRow));
+  } catch (error) {
+    console.error("BOOKING ERROR - POST /api/appointments");
+    console.error("Request body:", req.body);
+    console.error("Authenticated user:", req.authUser || req.user);
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error constraint:", error.constraint);
+    console.error("Error detail:", error.detail);
+    console.error("Error table:", error.table);
+    console.error("Error column:", error.column);
+    console.error("Full error:", error);
 
-  if (error.code === "23505") {
-    return res.status(409).json({
-      message: "Duplicate appointment or duplicate database value detected.",
-      error: error.message,
-      constraint: error.constraint,
-      detail: error.detail
+    if (isAppointmentCodeDuplicateError(error)) {
+      return res.status(409).json({
+        message: 'Failed to generate a unique appointment code. Please try again.',
+      });
+    }
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        message: "Duplicate appointment or duplicate database value detected.",
+        error: error.message,
+        constraint: error.constraint,
+        detail: error.detail
+      });
+    }
+
+    return res.status(500).json({
+      message: "Failed to book appointment.",
+      error: error.message
     });
   }
-
-  return res.status(500).json({
-    message: "Failed to book appointment.",
-    error: error.message
-  });
-}
 });
 
 app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req, res) => {
@@ -4832,6 +4912,9 @@ async function runStartupMaintenance() {
 
     console.log('Running ensureAppointmentStatusFlow...');
     await ensureAppointmentStatusFlow();
+
+    console.log('Running ensureAppointmentCodeTracking...');
+    await ensureAppointmentCodeTracking();
 
     console.log('Running ensureAppointmentAttachmentsTable...');
     await ensureAppointmentAttachmentsTable();
