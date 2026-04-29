@@ -3484,10 +3484,32 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
       appointmentId: insertedRow.id,
     });
 
-    return res.status(201).json(mapAppointmentRow(insertedRow));
-  } catch (error) {
-    return res.status(500).json({ message: 'Failed to book appointment.', error: error.message });
+   } catch (error) {
+  console.error("BOOKING ERROR - POST /api/appointments");
+  console.error("Request body:", req.body);
+  console.error("Authenticated user:", req.authUser || req.user);
+  console.error("Error message:", error.message);
+  console.error("Error code:", error.code);
+  console.error("Error constraint:", error.constraint);
+  console.error("Error detail:", error.detail);
+  console.error("Error table:", error.table);
+  console.error("Error column:", error.column);
+  console.error("Full error:", error);
+
+  if (error.code === "23505") {
+    return res.status(409).json({
+      message: "Duplicate appointment or duplicate database value detected.",
+      error: error.message,
+      constraint: error.constraint,
+      detail: error.detail
+    });
   }
+
+  return res.status(500).json({
+    message: "Failed to book appointment.",
+    error: error.message
+  });
+}
 });
 
 app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req, res) => {
