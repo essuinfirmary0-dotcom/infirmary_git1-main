@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
 import { queueService } from '../../services/queueService';
 import {
   Users,
@@ -61,7 +62,8 @@ export const AdminQueuePage = () => {
   const loadQueues = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await queueService.list({ status: 'All' });
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const data = await queueService.list({ status: 'All', date: today });
       setQueues(data || []);
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -97,7 +99,7 @@ export const AdminQueuePage = () => {
 
     return {
       queueStats: [
-        { label: 'All Queues', value: activeQueueRows.length, icon: Users, color: 'text-slate-700', bg: 'bg-slate-100' },
+        { label: 'Today\'s Queues', value: activeQueueRows.length, icon: Users, color: 'text-slate-700', bg: 'bg-slate-100' },
         {
           label: QUEUE_DISPLAY_STATUSES.CURRENTLY_SERVING,
           value: activeQueueRows.filter((queue) => queue.isCurrentServing).length,
@@ -170,10 +172,10 @@ export const AdminQueuePage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-            Queue Management
+            Today&apos;s Queues
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-medium">
-            Review only successfully checked-in patients, expand a row for the full appointment details, and serve the next patient when ready.
+            Review today&apos;s successfully checked-in patients, expand a row for the full appointment details, and serve the next patient when ready.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -326,7 +328,7 @@ export const AdminQueuePage = () => {
                                 </div>
                                 <div className="rounded-xl border border-slate-200 bg-white p-3">
                                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em] mb-1">
-                                    {receiptIdentity.label || 'Student / Employee ID Number'}
+                                    {receiptIdentity.label || 'User ID Number'}
                                   </p>
                                   <p className="text-sm font-black text-slate-900">{receiptIdentity.value || 'No ID recorded'}</p>
                                 </div>

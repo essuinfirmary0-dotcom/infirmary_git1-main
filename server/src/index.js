@@ -416,8 +416,6 @@ const DEFAULT_TIME_SLOTS = [
   { timeSlot: '2:00 PM - 3:00 PM', maxCapacity: 13, sortOrder: 5 },
   { timeSlot: '3:00 PM - 4:00 PM', maxCapacity: 13, sortOrder: 6 },
   { timeSlot: '4:00 PM - 5:00 PM', maxCapacity: 11, sortOrder: 7 },
-  { timeSlot: '10:00 PM - 11:00 PM', maxCapacity: 10, sortOrder: 8 },
-  { timeSlot: '11:00 PM - 12:00 AM', maxCapacity: 10, sortOrder: 9 },
 ];
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;

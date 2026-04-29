@@ -918,6 +918,9 @@ export const AdminAppointmentsPage = () => {
                   setSelectedDate(normalizeCalendarDate(nextDate));
                 }}
                 value={selectedDate}
+                tileDisabled={({ date: calendarDate, view }) =>
+                  view === 'month' && isInfirmaryClosedOnDate(calendarDate)
+                }
                 tileClassName={getCalendarTileClassName}
                 className="rounded-xl border-none w-full max-w-full"
               />

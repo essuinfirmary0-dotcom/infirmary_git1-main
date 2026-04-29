@@ -14,7 +14,7 @@ const pageCopy = {
     icon: Stethoscope,
     title: 'Welcome Back',
     subtitle: 'Sign in to book appointments and manage your infirmary visits.',
-    identifierLabel: 'Student ID or Employee ID',
+    identifierLabel: 'Student ID',
     identifierPlaceholder: 'e.g. 23-00275',
     submitLabel: 'Sign In',
     loadingLabel: 'Signing in...',

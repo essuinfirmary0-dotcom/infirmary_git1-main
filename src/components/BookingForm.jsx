@@ -167,13 +167,10 @@ const DEFAULT_TIME_SLOT_OPTIONS = [
   { time: '2:00 PM - 3:00 PM', maxCapacity: 13, session: 'afternoon' },
   { time: '3:00 PM - 4:00 PM', maxCapacity: 13, session: 'afternoon' },
   { time: '4:00 PM - 5:00 PM', maxCapacity: 11, session: 'afternoon' },
-  { time: '10:00 PM - 11:00 PM', maxCapacity: 10, session: 'night' },
-  { time: '11:00 PM - 12:00 AM', maxCapacity: 10, session: 'night' },
 ];
 const TIME_SLOT_SECTIONS = [
   { key: 'morning', label: 'Morning Session', totalCapacity: 50 },
   { key: 'afternoon', label: 'Afternoon Session', totalCapacity: 50 },
-  { key: 'night', label: 'Temporary Night Session', totalCapacity: 20 },
 ];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
 
@@ -214,6 +211,16 @@ const supportsRequirementUploads = (service, subcategory) =>
   service === 'Medical' && subcategory === 'Certification';
 
 const getCurrentSystemDate = (baseDate = new Date()) => startOfDay(baseDate);
+
+const getNextAvailableBookingDate = (baseDate = new Date()) => {
+  const candidateDate = startOfDay(baseDate);
+
+  while (isInfirmaryClosedOnDate(candidateDate)) {
+    candidateDate.setDate(candidateDate.getDate() + 1);
+  }
+
+  return candidateDate;
+};
 
 const getMillisecondsUntilNextDay = (baseDate = new Date()) => {
   const nextDay = new Date(baseDate);
@@ -604,7 +611,7 @@ export const BookingForm = ({
 }) => {
   const navigate = useNavigate();
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
-  const [date, setDate] = useState(() => getCurrentSystemDate());
+  const [date, setDate] = useState(() => getNextAvailableBookingDate());
   const [hasUserSelectedDate, setHasUserSelectedDate] = useState(false);
   const [formData, setFormData] = useState(() => initialFormData(user));
   const [requirementFileGroups, setRequirementFileGroups] = useState({
@@ -649,12 +656,17 @@ export const BookingForm = ({
 
   useEffect(() => {
     const currentSystemDate = getCurrentSystemDate();
+    const nextAvailableBookingDate = getNextAvailableBookingDate(currentSystemDate);
 
     setDate((currentSelectedDate) => {
       const normalizedSelectedDate = parseAppointmentDateValue(currentSelectedDate, currentSystemDate);
 
-      if (!hasUserSelectedDate || isBefore(normalizedSelectedDate, currentSystemDate)) {
-        return currentSystemDate;
+      if (
+        !hasUserSelectedDate
+        || isBefore(normalizedSelectedDate, currentSystemDate)
+        || isInfirmaryClosedOnDate(normalizedSelectedDate)
+      ) {
+        return nextAvailableBookingDate;
       }
 
       return normalizedSelectedDate;
@@ -700,7 +712,7 @@ export const BookingForm = ({
       return;
     }
 
-    setDate(getCurrentSystemDate());
+    setDate(getNextAvailableBookingDate());
     setHasUserSelectedDate(false);
     setFormData((prev) => ({
       ...prev,
@@ -810,7 +822,7 @@ export const BookingForm = ({
   const handleConfirmationDone = () => {
     setShowConfirmation(false);
     setLastBooked(null);
-    setDate(getCurrentSystemDate());
+    setDate(getNextAvailableBookingDate());
     setHasUserSelectedDate(false);
     setFormData(initialFormData(user));
     setRequirementFileGroups({

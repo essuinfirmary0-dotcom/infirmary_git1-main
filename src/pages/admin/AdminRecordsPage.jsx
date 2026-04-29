@@ -515,7 +515,7 @@ export const AdminRecordsPage = () => {
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" size={20} />
             <input
               type="text"
-              placeholder="Search by name, student ID, employee ID, or email..."
+              placeholder="Search by name, student ID, or email..."
               value={recordsSearchQuery}
               onChange={handleRecordsSearchChange}
               className="w-full pl-14 pr-5 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm sm:text-base font-medium text-slate-700 shadow-sm placeholder:text-slate-400"
