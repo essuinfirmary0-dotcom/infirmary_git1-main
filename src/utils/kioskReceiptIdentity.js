@@ -1,4 +1,4 @@
-import { isEmployeeUser, isGuestUser, isStudentUser } from './userIdentity';
+import { isGuestUser, isStudentUser } from './userIdentity';
 
 const STUDENT_USER_TYPES = new Set(['student', 'new', 'old']);
 
@@ -9,19 +9,16 @@ function cleanValue(value) {
 
 function inferReceiptType(user = {}) {
   const normalizedType = cleanValue(user.receiptIdType || user.userType).toLowerCase();
-  if (normalizedType === 'guest' || normalizedType === 'employee' || STUDENT_USER_TYPES.has(normalizedType)) {
-    return normalizedType === 'guest' || normalizedType === 'employee'
+  if (normalizedType === 'guest' || STUDENT_USER_TYPES.has(normalizedType)) {
+    return normalizedType === 'guest'
       ? normalizedType
       : 'student';
   }
 
   if (isGuestUser(user) || cleanValue(user.guestId)) {
     return 'guest';
-  }
-  if (isEmployeeUser(user) || (cleanValue(user.employeeNumber) && !cleanValue(user.studentNumber))) {
-    return 'employee';
-  }
-  if (isStudentUser(user) || cleanValue(user.studentNumber) || cleanValue(user.employeeNumber)) {
+ }
+  if (isStudentUser(user) || cleanValue(user.studentNumber)) {
     return 'student';
   }
 
@@ -46,14 +43,6 @@ export function resolveKioskReceiptIdentity(user = {}) {
       type: 'guest',
       label: 'Guest ID',
       value: cleanValue(user.guestId || user.idNumber || user.receiptIdValue),
-    };
-  }
-
-  if (inferredType === 'employee') {
-    return {
-      type: 'employee',
-      label: 'Employee Number',
-      value: cleanValue(user.employeeNumber || user.receiptIdValue),
     };
   }
 

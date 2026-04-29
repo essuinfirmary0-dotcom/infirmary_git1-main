@@ -105,7 +105,6 @@ export const AdminAccountsPage = () => {
         account.name,
         account.email,
         account.idNumber,
-        account.employeeNumber,
         account.status,
         account.userType,
       ]
@@ -484,7 +483,7 @@ export const AdminAccountsPage = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, email, login ID, employee number, status..."
+              placeholder="Search by name, email, login ID, status..."
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm font-medium"
             />
           </div>
@@ -533,10 +532,6 @@ export const AdminAccountsPage = () => {
                           <div className="flex items-center gap-2 text-slate-600">
                             <UserSquare2 size={16} className="text-slate-400 shrink-0" />
                             <span className="font-medium">Login ID: {account.idNumber || '—'}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Users size={16} className="text-slate-400 shrink-0" />
-                            <span className="font-medium">Employee No.: {account.employeeNumber || '—'}</span>
                           </div>
                         </div>
 

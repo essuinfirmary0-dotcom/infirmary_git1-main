@@ -81,7 +81,6 @@ export const AdminUserControlPage = () => {
         account.email,
         account.idNumber,
         account.studentNumber,
-        account.employeeNumber,
         account.status,
         account.userType,
       ]
@@ -159,7 +158,7 @@ export const AdminUserControlPage = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">User Control</h1>
-          <p className="text-sm text-slate-500 font-medium">Manage student and employee access accounts on a dedicated page.</p>
+          <p className="text-sm text-slate-500 font-medium">Manage student access accounts on a dedicated page.</p>
         </div>
         <button
           type="button"
@@ -192,7 +191,7 @@ export const AdminUserControlPage = () => {
             type="text"
             value={userSearchQuery}
             onChange={(e) => setUserSearchQuery(e.target.value)}
-            placeholder="Search users by name, email, login ID, student number, employee number, status..."
+            placeholder="Search users by name, email, login ID, student number, status..."
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm font-medium"
           />
         </div>

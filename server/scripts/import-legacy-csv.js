@@ -123,11 +123,6 @@ function normalizeUserType(role) {
   if (cleaned === 'admin') {
     return 'admin';
   }
-
-  if (cleaned === 'employee') {
-    return 'employee';
-  }
-
   return 'staff';
 }
 
@@ -189,7 +184,6 @@ async function upsertUsers(client, users) {
     const role = nullIfBlank(row.role);
     const hasDuplicateIdNumber = idNumber ? (idNumberCounts.get(idNumber) || 0) > 1 : false;
     const studentNumber = userType === 'student' && !hasDuplicateIdNumber ? idNumber : null;
-    const employeeNumber = userType !== 'student' && !hasDuplicateIdNumber ? idNumber : null;
 
     await client.query(
       `
@@ -210,7 +204,6 @@ async function upsertUsers(client, users) {
           user_type,
           email,
           student_number,
-          employee_number,
           created_at,
           updated_at
         )
@@ -235,7 +228,6 @@ async function upsertUsers(client, users) {
             user_type = EXCLUDED.user_type,
             email = EXCLUDED.email,
             student_number = COALESCE(EXCLUDED.student_number, public.users_auth.student_number),
-            employee_number = COALESCE(EXCLUDED.employee_number, public.users_auth.employee_number),
             updated_at = EXCLUDED.updated_at
       `,
       [
@@ -255,7 +247,6 @@ async function upsertUsers(client, users) {
         userType,
         nullIfBlank(row.email),
         studentNumber,
-        employeeNumber,
         nullIfBlank(row.created_at),
         nullIfBlank(row.created_at),
       ],

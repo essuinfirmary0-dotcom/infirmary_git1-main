@@ -11,7 +11,6 @@ export function resolveQrValue(user = {}) {
     normalizeQrSource(resolveDisplayIdentifier(user)) ||
     normalizeQrSource(user.idNumber) ||
     normalizeQrSource(user.studentNumber) ||
-    normalizeQrSource(user.employeeNumber) ||
     null
   );
 }

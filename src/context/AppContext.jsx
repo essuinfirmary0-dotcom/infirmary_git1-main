@@ -53,7 +53,6 @@ export const AppProvider = ({ children }) => {
         userType: authUser.userType || null,
         pictureUrl: authUser.pictureUrl || null,
         studentNumber: authUser.studentNumber || null,
-        employeeNumber: authUser.employeeNumber || null,
         college: authUser.college || '',
         program: authUser.program || '',
         department: authUser.department || '',

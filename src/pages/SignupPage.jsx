@@ -7,12 +7,6 @@ import { authService } from '../services/authService';
 import { resolveUserQrCode } from '../utils/qrCode';
 import { getRoleIdentityInfo } from '../utils/userIdentity';
 
-const userTypes = [
-  { id: 'new', label: 'New Student', icon: GraduationCap, color: 'bg-blue-500' },
-  { id: 'old', label: 'Old Student', icon: Building2, color: 'bg-emerald-500' },
-  { id: 'employee', label: 'Employee', icon: Briefcase, color: 'bg-orange-500' }
-];
-
 const colleges = [
   'College of Arts and Sciences',
   'College of Business and Accountancy',

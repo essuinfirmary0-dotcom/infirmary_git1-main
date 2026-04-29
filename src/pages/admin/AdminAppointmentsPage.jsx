@@ -172,7 +172,6 @@ const buildAppointmentSearchIndex = (appointment) => {
     appointment?.purpose,
     appointment?.status,
     appointment?.studentNumber,
-    appointment?.employeeNumber,
     appointment?.idNumber,
     receiptIdentity.value,
   ]

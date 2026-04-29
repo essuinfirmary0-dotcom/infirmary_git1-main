@@ -490,7 +490,7 @@ export function KioskCheckIn() {
         </div>
         <div className="space-y-1 text-center">
           <p className="font-black text-xl sm:text-2xl">Enter ID</p>
-          <p className="text-sm text-white/80 max-w-xs">Type your student or employee ID.</p>
+          <p className="text-sm text-white/80 max-w-xs">Type your student ID.</p>
         </div>
       </button>
     </div>
