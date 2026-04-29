@@ -23,13 +23,8 @@ const configuredAllowedOrigins = String(process.env.CORS_ORIGIN || process.env.C
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
-const defaultDevOrigins = new Set([
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:4173',
-  'http://127.0.0.1:4173',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
+const defaultAllowedOrigins = new Set([
+  'https://infirmary-connect.netlify.app',
 ]);
 const supabaseUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
 const supabaseServiceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
@@ -75,11 +70,15 @@ function isOriginAllowed(origin, requestBaseOrigin = '') {
     return true;
   }
 
+  if (defaultAllowedOrigins.has(origin)) {
+    return true;
+  }
+
   if (configuredAllowedOrigins.length > 0) {
     return configuredAllowedOrigins.includes(origin);
   }
 
-  return !isProduction || defaultDevOrigins.has(origin);
+  return !isProduction || defaultAllowedOrigins.has(origin);
 }
 
 app.use((req, res, next) => {

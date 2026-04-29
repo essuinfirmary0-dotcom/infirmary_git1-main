@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const RAILWAY_FALLBACK_URL = 'https://discerning-exploration-production-8d2a.up.railway.app';
+const RENDER_FALLBACK_URL = 'https://infirmary-git1-main.onrender.com';
 
 const trimTrailingSlash = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -14,7 +14,7 @@ const resolveBaseUrl = () => {
     return trimTrailingSlash(window.location.origin);
   }
 
-  return RAILWAY_FALLBACK_URL;
+  return RENDER_FALLBACK_URL;
 };
 
 const BASE_URL = resolveBaseUrl();

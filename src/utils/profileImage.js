@@ -8,8 +8,6 @@ const isAllowedProfileImageSrc = (pictureUrl) => {
   if (normalized.startsWith('data:image/')) return true;
   if (normalized.startsWith('blob:')) return true;
   if (normalized.startsWith('/')) return true;
-  if (/^https?:\/\/localhost(?::\d+)?\//i.test(normalized)) return true;
-  if (/^https?:\/\/127\.0\.0\.1(?::\d+)?\//i.test(normalized)) return true;
   if (/supabase\.co/i.test(normalized)) return false;
 
   return false;

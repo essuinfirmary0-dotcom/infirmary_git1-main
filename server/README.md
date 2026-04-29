@@ -33,4 +33,4 @@ npm --prefix server run dev
 
 ## 6. Check the connection
 
-Open `http://localhost:5000/api/health`
+Open `https://infirmary-git1-main.onrender.com/api/health`
