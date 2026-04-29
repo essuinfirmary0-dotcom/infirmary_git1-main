@@ -908,7 +908,6 @@ export const AdminAppointmentsPage = () => {
               <div className="mb-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Appointment Calendar</p>
                 <p className="mt-1 text-xs text-slate-500 font-medium">Pick any past, current, or future date to view that day's schedule.</p>
-                <p className="mt-2 text-xs font-semibold text-amber-700">Friday, Saturday, and Sunday are blocked for scheduling, not clickable.</p>
               </div>
               <ReactCalendar
                 onChange={(nextValue) => {
