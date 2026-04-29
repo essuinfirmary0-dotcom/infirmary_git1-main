@@ -48,6 +48,13 @@ function getPatientIdentifierText(user) {
   return identifierValue ? `${identifierLabel}: ${identifierValue}` : '';
 }
 
+function doesUserMatchQueueContext(user, queueContext) {
+  if (!user || !queueContext?.user) return false;
+  if (user.id && queueContext.user.id && user.id === queueContext.user.id) return true;
+  if (user.email && queueContext.user.email && user.email === queueContext.user.email) return true;
+  return false;
+}
+
 function buildQueueDraft(queueContext) {
   const service = queueContext?.appointment?.service || 'Consultation';
   const subcategory = queueContext?.appointment?.subcategory;
@@ -220,38 +227,14 @@ export const AdminRecordsPage = () => {
     consumedQueueContextRef.current = queueContext.queueId;
   }, [patients, queueContext]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadAppointmentAttachments = async () => {
-      if (!queueContext?.appointment?.id) {
-        setAppointmentAttachments([]);
-        return;
-      }
-
-      try {
-        const attachments = await appointmentService.getAttachments(queueContext.appointment.id);
-        if (!cancelled) {
-          setAppointmentAttachments(Array.isArray(attachments) ? attachments : []);
-        }
-      } catch {
-        if (!cancelled) {
-          setAppointmentAttachments([]);
-        }
-      }
-    };
-
-    loadAppointmentAttachments();
-    return () => {
-      cancelled = true;
-    };
-  }, [queueContext, selectedRecordUser]);
-
   const userRecords = apiRecords;
+  const activeQueueContext = doesUserMatchQueueContext(selectedRecordUser, queueContext)
+    ? queueContext
+    : null;
   const isViewingRecord = selectedRecordTile && !isAddingRecord;
-  const hasAppointmentAttachmentContext = Boolean(queueContext?.appointment?.id);
+  const hasAppointmentAttachmentContext = Boolean(activeQueueContext?.appointment?.id);
   const appointmentRequiresRequirementFiles = appointmentNeedsRequirementFiles(
-    queueContext?.appointment,
+    activeQueueContext?.appointment,
   );
   const isCertificationFlow =
     hasAppointmentAttachmentContext &&
@@ -271,6 +254,87 @@ export const AdminRecordsPage = () => {
           ]
         : [];
   const selectedRecordUserIdentifierText = getPatientIdentifierText(selectedRecordUser);
+  const isSearchStage = recordsSearchQuery.trim() !== '' && !selectedRecordUser;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAppointmentAttachments = async () => {
+      if (!activeQueueContext?.appointment?.id) {
+        setAppointmentAttachments([]);
+        return;
+      }
+
+      try {
+        const attachments = await appointmentService.getAttachments(activeQueueContext.appointment.id);
+        if (!cancelled) {
+          setAppointmentAttachments(Array.isArray(attachments) ? attachments : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setAppointmentAttachments([]);
+        }
+      }
+    };
+
+    loadAppointmentAttachments();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeQueueContext]);
+
+  const resetRecordWorkspaceState = ({ clearSelectedUser = false } = {}) => {
+    if (clearSelectedUser) {
+      setSelectedRecordUser(null);
+    }
+    setSelectedRecordTile(null);
+    setIsAddingRecord(false);
+    setRecordTitle('');
+    setBpSystolic('');
+    setBpDiastolic('');
+    setRecordNotes('');
+    setRecordDefaultNotes('');
+    setRecordFiles([]);
+    setHardcopyVerified(false);
+    setPreviewImageUrl(null);
+  };
+
+  const handleRecordsSearchChange = (e) => {
+    const nextQuery = e.target.value;
+    setRecordsSearchQuery(nextQuery);
+
+    if (selectedRecordUser || selectedRecordTile || isAddingRecord) {
+      resetRecordWorkspaceState({ clearSelectedUser: true });
+    }
+  };
+
+  const handleSelectRecordUser = (user) => {
+    setSelectedRecordUser(user);
+    setSelectedRecordTile(null);
+    setIsAddingRecord(false);
+    setRecordTitle('');
+    setBpSystolic('');
+    setBpDiastolic('');
+    setRecordNotes('');
+    setRecordDefaultNotes('');
+    setRecordFiles([]);
+    setHardcopyVerified(false);
+    setPreviewImageUrl(null);
+  };
+
+  const openNewRecordForm = () => {
+    const draft = activeQueueContext?.appointment ? buildQueueDraft(activeQueueContext) : null;
+    setSelectedRecordTile(null);
+    setIsAddingRecord(true);
+    setRecordTitle(draft?.title || 'Medical Record');
+    setBpSystolic('');
+    setBpDiastolic('');
+    setRecordDefaultNotes(draft?.defaultNotes || '');
+    setRecordNotes('');
+    setRecordFiles([]);
+    setHardcopyVerified(false);
+    setPreviewImageUrl(null);
+  };
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
@@ -376,13 +440,13 @@ export const AdminRecordsPage = () => {
 
     setIsSaving(true);
     try {
-      const activeDraft = queueContext?.appointment?.id ? buildQueueDraft(queueContext) : null;
+      const activeDraft = activeQueueContext?.appointment?.id ? buildQueueDraft(activeQueueContext) : null;
       const savedRecord = await medicalRecordService.createRecord(selectedRecordUser.id, {
         title: recordTitle.trim(),
         notes: combinedNotes,
         attachmentFiles: hasAppointmentAttachmentContext ? [] : recordFiles,
-        queueId: queueContext?.queueId || '',
-        appointmentId: queueContext?.appointment?.id || '',
+        queueId: activeQueueContext?.queueId || '',
+        appointmentId: activeQueueContext?.appointment?.id || '',
         recordType: activeDraft?.recordType || recordTitle.trim(),
         purpose: activeDraft?.purpose || '',
         isHardcopyVerified: wantsCertificateIssuance ? hardcopyVerified : false,
@@ -449,7 +513,7 @@ export const AdminRecordsPage = () => {
               type="text"
               placeholder="Search by name, student ID, employee ID, or email..."
               value={recordsSearchQuery}
-              onChange={(e) => setRecordsSearchQuery(e.target.value)}
+              onChange={handleRecordsSearchChange}
               className="w-full pl-14 pr-5 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm sm:text-base font-medium text-slate-700 shadow-sm placeholder:text-slate-400"
             />
           </div>
@@ -458,43 +522,25 @@ export const AdminRecordsPage = () => {
               <div className="space-y-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Results</p>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {recordsSearchedUsers.map((user) => {
-                    const patientIdentifierText = getPatientIdentifierText(user);
-
-                    return (
-                      <button
-                        key={user.id}
-                        onClick={() => {
-                          setSelectedRecordUser(user);
-                          setIsAddingRecord(false);
-                          setSelectedRecordTile(null);
-                          setRecordDefaultNotes('');
-                          setRecordNotes('');
-                          setRecordTitle('');
-                          setHardcopyVerified(false);
-                        }}
-                        className={`w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between group ${
-                          selectedRecordUser?.id === user.id ? 'border-primary bg-white ring-2 ring-primary/15 shadow-sm' : 'border-slate-200 bg-white/90 hover:border-primary/30 hover:bg-white'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                            <User size={20} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-black text-slate-800 text-sm truncate">{user.name}</p>
-                            <p className="text-xs text-slate-500 font-medium truncate">{user.email}</p>
-                            {patientIdentifierText && (
-                              <p className="text-[11px] text-slate-400 font-semibold mt-0.5 truncate">
-                                {patientIdentifierText}
-                              </p>
-                            )}
-                          </div>
+                  {recordsSearchedUsers.map((user) => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleSelectRecordUser(user)}
+                      className={`w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between group ${
+                        selectedRecordUser?.id === user.id ? 'border-primary bg-white ring-2 ring-primary/15 shadow-sm' : 'border-slate-200 bg-white/90 hover:border-primary/30 hover:bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all shrink-0">
+                          <User size={20} />
                         </div>
-                        <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all shrink-0" />
-                      </button>
-                    );
-                  })}
+                        <div className="min-w-0">
+                          <p className="font-black text-slate-800 text-sm sm:text-base truncate">{user.name}</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-slate-300 group-hover:text-primary transition-all shrink-0" />
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : recordsSearchQuery.trim() !== '' ? (
@@ -526,16 +572,7 @@ export const AdminRecordsPage = () => {
               {!selectedRecordTile && !isAddingRecord && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsAddingRecord(true);
-                    setRecordTitle(queueContext?.appointment ? buildQueueDraft(queueContext).title : 'Medical Record');
-                    setBpSystolic('');
-                    setBpDiastolic('');
-                    setRecordDefaultNotes(queueContext?.appointment ? buildQueueDraft(queueContext).defaultNotes : '');
-                    setRecordNotes('');
-                    setRecordFiles([]);
-                    setHardcopyVerified(false);
-                  }}
+                  onClick={openNewRecordForm}
                   className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white text-sm font-black shadow-lg shadow-primary/20 hover:bg-primary-hover transition-all"
                 >
                   <Plus size={16} />
@@ -562,17 +599,7 @@ export const AdminRecordsPage = () => {
                     Record Results
                   </h3>
                   <button
-                    onClick={() => {
-                      setSelectedRecordUser(null);
-                      setSelectedRecordTile(null);
-                      setIsAddingRecord(false);
-                      setRecordTitle('');
-                      setBpSystolic('');
-                      setBpDiastolic('');
-                      setRecordNotes('');
-                      setRecordDefaultNotes('');
-                      setRecordFiles([]);
-                    }}
+                    onClick={() => resetRecordWorkspaceState({ clearSelectedUser: true })}
                     className="text-xs font-black text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest"
                   >
                     Close
@@ -581,15 +608,7 @@ export const AdminRecordsPage = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   <motion.button
                     whileHover={{ y: -4 }}
-                    onClick={() => {
-                      setIsAddingRecord(true);
-                      setRecordTitle('');
-                      setBpSystolic('');
-                      setBpDiastolic('');
-                      setRecordNotes('');
-                      setRecordFiles([]);
-                      setHardcopyVerified(false);
-                    }}
+                    onClick={openNewRecordForm}
                     className="p-5 bg-linear-to-br from-primary/5 to-emerald-50 border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center space-y-3 group hover:bg-primary/10 hover:border-primary transition-all"
                   >
                     <div className="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center shadow-lg shadow-primary/20">
@@ -774,20 +793,20 @@ export const AdminRecordsPage = () => {
                     </div>
                   </div>
                 </div>
-                {queueContext?.queueId && selectedRecordUser?.id === queueContext.user?.id && (
+                {activeQueueContext?.queueId && (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-1">
                     <p className="text-[10px] font-black text-primary uppercase tracking-[0.18em]">Serving Queue Context</p>
                     <p className="text-sm font-black text-slate-800">
-                      {queueContext.appointment?.service || 'Consultation'}
-                      {queueContext.appointment?.subcategory ? ` - ${queueContext.appointment.subcategory}` : ''}
+                      {activeQueueContext.appointment?.service || 'Consultation'}
+                      {activeQueueContext.appointment?.subcategory ? ` - ${activeQueueContext.appointment.subcategory}` : ''}
                     </p>
                     <p className="text-xs text-slate-600 font-medium">
-                      {queueContext.queueNumber ? `Queue ${queueContext.queueNumber}` : 'Active queue patient'}
-                      {queueContext.appointment?.code ? ` • ${queueContext.appointment.code}` : ''}
+                      {activeQueueContext.queueNumber ? `Queue ${activeQueueContext.queueNumber}` : 'Active queue patient'}
+                      {activeQueueContext.appointment?.code ? ` | ${activeQueueContext.appointment.code}` : ''}
                     </p>
-                    {queueContext.appointment?.purpose && (
+                    {activeQueueContext.appointment?.purpose && (
                       <p className="text-xs text-slate-600 font-medium">
-                        Requested purpose: {queueContext.appointment.purpose}
+                        Requested purpose: {activeQueueContext.appointment.purpose}
                       </p>
                     )}
                   </div>
@@ -907,7 +926,7 @@ export const AdminRecordsPage = () => {
                 </div>
               </motion.div>
             )
-          ) : (
+          ) : isSearchStage ? null : (
             <div className="bg-linear-to-br from-slate-50 to-slate-100/70 border-2 border-dashed border-slate-200 rounded-[1.75rem] flex flex-col items-center justify-center p-12 text-center space-y-3">
               <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center text-slate-200 shadow-sm">
                 <FolderOpen size={28} />
