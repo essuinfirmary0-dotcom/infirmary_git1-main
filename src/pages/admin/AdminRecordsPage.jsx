@@ -299,6 +299,10 @@ export const AdminRecordsPage = () => {
     setPreviewImageUrl(null);
   };
 
+  const closeRecordWorkspaceModal = () => {
+    resetRecordWorkspaceState({ clearSelectedUser: true });
+  };
+
   const handleRecordsSearchChange = (e) => {
     const nextQuery = e.target.value;
     setRecordsSearchQuery(nextQuery);
@@ -551,7 +555,7 @@ export const AdminRecordsPage = () => {
           </div>
         </div>
 
-        {selectedRecordUser && (
+        {false && selectedRecordUser && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-sm">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -583,7 +587,8 @@ export const AdminRecordsPage = () => {
           </div>
         )}
 
-        <AnimatePresence mode="wait">
+        {false && (
+          <AnimatePresence mode="wait">
           {selectedRecordUser ? (
             !selectedRecordTile && !isAddingRecord ? (
               <motion.div
@@ -937,10 +942,415 @@ export const AdminRecordsPage = () => {
               </div>
             </div>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        )}
       </div>
 
       <AnimatePresence>
+        {selectedRecordUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-slate-900/55 backdrop-blur-sm p-4 sm:p-6"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 12 }}
+              className="mx-auto flex h-full max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <UserCircle2 size={24} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.22em]">Selected Patient</p>
+                      <h2 className="text-base sm:text-lg font-black text-slate-900 truncate">{selectedRecordUser.name}</h2>
+                      <p className="text-sm text-slate-500 font-medium truncate">{selectedRecordUser.email || 'No email available'}</p>
+                      {selectedRecordUserIdentifierText && (
+                        <p className="text-xs text-slate-400 font-semibold mt-1">
+                          {selectedRecordUserIdentifierText}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 sm:self-end lg:self-auto">
+                    {!selectedRecordTile && !isAddingRecord && (
+                      <button
+                        type="button"
+                        onClick={openNewRecordForm}
+                        className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white text-sm font-black shadow-lg shadow-primary/20 hover:bg-primary-hover transition-all"
+                      >
+                        <Plus size={16} />
+                        New Record
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={closeRecordWorkspaceModal}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:text-red-500 hover:border-red-200"
+                      aria-label="Close patient records modal"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto bg-slate-50/70 px-5 py-5 sm:px-6">
+                <AnimatePresence mode="wait">
+                  {!selectedRecordTile && !isAddingRecord ? (
+                    <motion.div
+                      key="record-tiles-modal"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                          <LayoutGrid size={20} className="text-primary" />
+                          Record Results
+                        </h3>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <motion.button
+                          whileHover={{ y: -4 }}
+                          onClick={openNewRecordForm}
+                          className="p-5 bg-linear-to-br from-primary/5 to-emerald-50 border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center space-y-3 group hover:bg-primary/10 hover:border-primary transition-all"
+                        >
+                          <div className="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center shadow-lg shadow-primary/20">
+                            <Plus size={24} />
+                          </div>
+                          <span className="text-xs font-black text-primary uppercase tracking-widest">New Record</span>
+                        </motion.button>
+                        {recordsLoading ? (
+                          <div className="col-span-1 sm:col-span-2 py-8 text-center text-slate-400 font-bold text-sm">
+                            Loading records...
+                          </div>
+                        ) : userRecords.length > 0 ? (
+                          userRecords.map((record) => (
+                            <motion.button
+                              key={record.id}
+                              whileHover={{ y: -4 }}
+                              onClick={() => setSelectedRecordTile(record)}
+                              className="p-5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-start space-y-2 group hover:bg-white hover:shadow-xl hover:shadow-slate-200/50 hover:border-primary/20 transition-all text-left"
+                            >
+                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 group-hover:text-primary transition-all shadow-sm overflow-hidden">
+                                {(record.attachmentPath || record.attachments?.[0]?.attachmentPath) && isImageAttachment({
+                                  attachmentPath: record.attachmentPath || record.attachments?.[0]?.attachmentPath,
+                                  attachmentMime: record.attachmentMime || record.attachments?.[0]?.attachmentMime,
+                                }) ? (
+                                  <img
+                                    src={getAttachmentUrl({
+                                      attachmentPath: record.attachmentPath || record.attachments?.[0]?.attachmentPath,
+                                      attachmentUrl: record.attachmentUrl || record.attachments?.[0]?.attachmentUrl || null,
+                                    })}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <FileText size={20} />
+                                )}
+                              </div>
+                              <div className="min-w-0 w-full">
+                                <p className="text-xs font-black text-slate-800 line-clamp-1">{record.title}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{formatRecordDate(record.recordedAt)}</p>
+                              </div>
+                            </motion.button>
+                          ))
+                        ) : (
+                          <div className="col-span-1 sm:col-span-2 xl:col-span-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                            <p className="text-sm font-black text-slate-500">No saved medical records yet.</p>
+                            <p className="text-xs font-medium text-slate-400 mt-1">Create the first record for this patient from here.</p>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  ) : isViewingRecord ? (
+                    <motion.div
+                      key="record-detail-modal"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="bg-white p-5 sm:p-6 rounded-[1.75rem] border border-slate-200 shadow-sm space-y-5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                          <FileText size={20} className="text-primary" />
+                          {selectedRecordTile.title}
+                        </h3>
+                        <button
+                          onClick={goBackToTiles}
+                          className="text-xs font-black text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest"
+                        >
+                          Back to list
+                        </button>
+                      </div>
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm">
+                            <UserCircle2 size={28} />
+                          </div>
+                          <div>
+                            <p className="text-base font-black text-slate-800">{selectedRecordUser.name}</p>
+                            <p className="text-xs text-slate-500 font-medium">{selectedRecordUser.email}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Date</p>
+                          <p className="text-sm font-bold text-slate-800">{formatRecordDate(selectedRecordTile.recordedAt) || selectedRecordTile.date}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Notes & observations</p>
+                          <p className="text-sm font-medium text-slate-700 whitespace-pre-wrap bg-slate-50 rounded-xl p-4 border border-slate-100 min-h-20">
+                            {selectedRecordTile.notes ?? '—'}
+                          </p>
+                        </div>
+                        {selectedRecordAttachments.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Attachments</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              {selectedRecordAttachments.map((att, i) => {
+                                const attachmentUrl = getAttachmentUrl(att);
+                                const isImage = isImageAttachment(att);
+                                return (
+                                  <div
+                                    key={att.id || `${att.attachmentPath}-${i}`}
+                                    className="relative overflow-hidden rounded-xl border-2 border-slate-100 bg-slate-50 group"
+                                  >
+                                    <div className="relative aspect-square w-full">
+                                      {isImage ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewImageUrl(attachmentUrl)}
+                                          className="absolute inset-0 w-full h-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset rounded-xl"
+                                        >
+                                          <img
+                                            src={attachmentUrl}
+                                            alt="Record attachment"
+                                            className="w-full h-full object-cover"
+                                          />
+                                        </button>
+                                      ) : (
+                                        <a
+                                          href={attachmentUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center"
+                                        >
+                                          <FileText size={28} className="text-slate-400" />
+                                          <span className="text-[11px] font-bold text-slate-600 break-all">
+                                            {att.originalName || att.attachmentPath?.split('/').pop() || 'Attachment'}
+                                          </span>
+                                        </a>
+                                      )}
+                                    </div>
+                                    <div className="space-y-1 border-t border-slate-100 bg-white p-2.5">
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-primary">
+                                        {getAttachmentLabel(att)}
+                                      </p>
+                                      <p className="text-xs font-semibold text-slate-600 break-all">
+                                        {att.originalName || att.attachmentPath?.split('/').pop() || 'Attachment'}
+                                      </p>
+                                    </div>
+                                    <a
+                                      href={attachmentUrl}
+                                      download={att.originalName || `record-attachment-${att.id || selectedRecordTile.id || 'file'}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-black/50 hover:bg-black/70 text-white transition-colors"
+                                      aria-label="Download attachment"
+                                    >
+                                      <Download size={14} />
+                                    </a>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="record-form-modal"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="bg-white p-5 sm:p-6 rounded-[1.75rem] border border-slate-200 shadow-sm space-y-5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                          <FileText size={20} className="text-primary" />
+                          New Entry
+                        </h3>
+                        <button
+                          onClick={goBackToTiles}
+                          className="text-xs font-black text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest"
+                        >
+                          Back to list
+                        </button>
+                      </div>
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm">
+                            <UserCircle2 size={22} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-black text-slate-800">{selectedRecordUser.name}</p>
+                            <p className="text-xs text-slate-500 font-medium">{selectedRecordUser.email}</p>
+                          </div>
+                        </div>
+                      </div>
+                      {activeQueueContext?.queueId && (
+                        <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-1">
+                          <p className="text-[10px] font-black text-primary uppercase tracking-[0.18em]">Serving Queue Context</p>
+                          <p className="text-sm font-black text-slate-800">
+                            {activeQueueContext.appointment?.service || 'Consultation'}
+                            {activeQueueContext.appointment?.subcategory ? ` - ${activeQueueContext.appointment.subcategory}` : ''}
+                          </p>
+                          <p className="text-xs text-slate-600 font-medium">
+                            {activeQueueContext.queueNumber ? `Queue ${activeQueueContext.queueNumber}` : 'Active queue patient'}
+                            {activeQueueContext.appointment?.code ? ` | ${activeQueueContext.appointment.code}` : ''}
+                          </p>
+                          {activeQueueContext.appointment?.purpose && (
+                            <p className="text-xs text-slate-600 font-medium">
+                              Requested purpose: {activeQueueContext.appointment.purpose}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">Record Type</label>
+                          <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800">
+                            {recordTitle || 'Medical Record'}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">Request Details</label>
+                          <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 whitespace-pre-wrap">
+                            {recordDefaultNotes || 'No default request details available.'}
+                          </div>
+                        </div>
+                        {hasAppointmentAttachmentContext && appointmentRequiresRequirementFiles && (
+                          <div className="space-y-2">
+                            <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">
+                              Requirement Files (Clickable)
+                            </label>
+                            {renderAppointmentRequirementFiles()}
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">Blood Pressure</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-3 items-center">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={bpSystolic}
+                              onChange={(e) => setBpSystolic(e.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+                              placeholder="Systolic"
+                              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm font-medium"
+                            />
+                            <div className="text-center text-lg font-black text-slate-400">/</div>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={bpDiastolic}
+                              onChange={(e) => setBpDiastolic(e.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+                              placeholder="Diastolic"
+                              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm font-medium"
+                            />
+                          </div>
+                          <p className="text-xs text-slate-500 font-medium">
+                            Optional. Example: `120 / 80 mmHg`
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">Remarks / Findings</label>
+                          <textarea
+                            rows={5}
+                            placeholder="Add your findings, remarks, reading, or result summary for this patient..."
+                            value={recordNotes}
+                            onChange={(e) => setRecordNotes(e.target.value)}
+                            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm font-medium resize-none"
+                          />
+                        </div>
+                        {!hasAppointmentAttachmentContext && (
+                          <div className="space-y-2">
+                            <label className="text-xs font-black text-slate-700 uppercase tracking-widest ml-1">
+                              Attachments (X-ray, scans, documents)
+                            </label>
+                            <div
+                              onClick={() => fileInputRef.current?.click()}
+                              className="border-2 border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center space-y-2 cursor-pointer hover:bg-slate-50 transition-all group"
+                            >
+                              <FileUp size={20} className="text-slate-300 group-hover:text-primary transition-colors" />
+                              <p className="text-xs font-black text-slate-400 uppercase">Upload files</p>
+                              <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,.pdf,.doc,.docx,.txt" className="hidden" />
+                            </div>
+                            {recordFiles.length > 0 && (
+                              <div className="space-y-2">
+                                {recordFiles.map((file, i) => (
+                                  <div key={i} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                                    <span className="text-xs font-bold text-slate-600 truncate max-w-45">{file.name}</span>
+                                    <button type="button" onClick={() => removeFile(i)} className="text-slate-400 hover:text-red-500">
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {isCertificationFlow && (
+                          <label className="flex items-start gap-2.5 p-3 rounded-xl border border-emerald-200 bg-emerald-50">
+                            <input
+                              type="checkbox"
+                              checked={hardcopyVerified}
+                              onChange={(e) => setHardcopyVerified(e.target.checked)}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                            />
+                            <span className="text-xs font-semibold text-emerald-800">
+                              I verified the uploaded requirement files against the patient&apos;s hardcopy documents.
+                            </span>
+                          </label>
+                        )}
+                        <div className="grid grid-cols-1 gap-3">
+                          <button
+                            onClick={handleSaveRecord}
+                            disabled={isSaving || !recordNotes.trim()}
+                            className="w-full py-3 bg-slate-100 text-slate-800 font-black rounded-xl hover:bg-slate-200 transition-all text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {isSaving ? (
+                              <div className="w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-700 rounded-full animate-spin" />
+                            ) : (
+                              <>
+                                <Save size={14} />
+                                Save medical record
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {previewImageUrl && (
           <motion.div
             initial={{ opacity: 0 }}
