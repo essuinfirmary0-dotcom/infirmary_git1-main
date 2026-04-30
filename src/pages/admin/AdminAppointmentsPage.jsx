@@ -71,6 +71,11 @@ const normalizeCalendarDate = (value) => {
   return parsed ? startOfDay(parsed) : startOfDay(new Date());
 };
 
+const getAppointmentDateKey = (value) => {
+  const parsed = toDate(value);
+  return parsed ? safeFormat(parsed, 'yyyy-MM-dd') : '';
+};
+
 const getAppointmentStatusKey = (status) => {
   const normalized = String(status || '').trim();
   if (normalized === 'Completed') return 'completed';
@@ -422,6 +427,18 @@ export const AdminAppointmentsPage = () => {
     { label: 'This Month', value: appointments.filter((apt) => matchesRelativeDateScope(apt.date, 'thisMonth')).length, icon: XCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ]), [appointments]);
 
+  const appointmentDateCounts = useMemo(() => {
+    const counts = new Map();
+
+    appointments.forEach((appointment) => {
+      const dateKey = getAppointmentDateKey(appointment.date);
+      if (!dateKey) return;
+      counts.set(dateKey, (counts.get(dateKey) || 0) + 1);
+    });
+
+    return counts;
+  }, [appointments]);
+
   const selectedDateAppointments = useMemo(() => {
     const normalizedSearchQuery = appointmentSearchQuery.trim().toLowerCase();
 
@@ -519,7 +536,30 @@ export const AdminAppointmentsPage = () => {
       classNames.push('booking-calendar__tile--closed');
     }
 
+    if (appointmentDateCounts.has(getAppointmentDateKey(calendarDate))) {
+      classNames.push('booking-calendar__tile--has-appointments');
+    }
+
     return classNames.join(' ') || null;
+  };
+
+  const getCalendarTileContent = ({ date: calendarDate, view }) => {
+    if (view !== 'month') {
+      return null;
+    }
+
+    const appointmentCount = appointmentDateCounts.get(getAppointmentDateKey(calendarDate)) || 0;
+    if (appointmentCount < 1) {
+      return null;
+    }
+
+    return (
+      <span
+        className="booking-calendar__appointment-dot"
+        title={`${appointmentCount} appointment${appointmentCount === 1 ? '' : 's'}`}
+        aria-hidden="true"
+      />
+    );
   };
 
   useEffect(() => {
@@ -918,10 +958,8 @@ export const AdminAppointmentsPage = () => {
                   setSelectedDate(normalizeCalendarDate(nextDate));
                 }}
                 value={selectedDate}
-                tileDisabled={({ date: calendarDate, view }) =>
-                  view === 'month' && isInfirmaryClosedOnDate(calendarDate)
-                }
                 tileClassName={getCalendarTileClassName}
+                tileContent={getCalendarTileContent}
                 className="rounded-xl border-none w-full max-w-full"
               />
             </div>
