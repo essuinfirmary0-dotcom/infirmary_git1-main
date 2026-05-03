@@ -301,6 +301,25 @@ function isEmployeeLikeUser(user) {
   return true;
 }
 
+function isStudentLikeUser(user) {
+  const normalizedUserType = normalizeUserType(getEffectiveUserType(user));
+
+  if (STUDENT_USER_TYPES.has(normalizedUserType)) {
+    return true;
+  }
+
+  return Boolean(normalizeIdentifier(user?.student_number))
+    && !isEmployeeLikeUser(user);
+}
+
+function canUseEmailLogin(user) {
+  return isEmployeeLikeUser(user) || isAdminUserType(getEffectiveUserType(user));
+}
+
+function canUseIdentifierLogin(user) {
+  return isStudentLikeUser(user) || isAdminUserType(getEffectiveUserType(user));
+}
+
 function resolveActualUserIdentifier(user) {
   const idNumber = normalizeIdentifier(user?.id_number);
   const studentNumber = normalizeIdentifier(user?.student_number);
@@ -415,7 +434,11 @@ async function fetchAuthUserById(userId) {
 }
 
 async function findAuthUserByLoginIdentifier(identifier) {
-  const normalizedLookup = normalizeIdentifier(identifier).toUpperCase();
+  const rawLookup = normalizeIdentifier(identifier);
+  const isEmailLookup = rawLookup.includes('@');
+  const normalizedLookup = isEmailLookup
+    ? normalizeEmail(rawLookup)
+    : rawLookup.toUpperCase();
 
   if (!normalizedLookup) {
     return null;
@@ -424,20 +447,25 @@ async function findAuthUserByLoginIdentifier(identifier) {
   const { rows } = await pool.query(
     `
       ${AUTH_USER_SELECT}
-      WHERE UPPER(COALESCE(u.id_number, '')) = $1
-         OR UPPER(COALESCE(u.student_number, '')) = $1
-         OR UPPER(COALESCE(u.employee_number, '')) = $1
-         OR UPPER(COALESCE(u.email, '')) = $1
+      WHERE ${
+        isEmailLookup
+          ? "LOWER(COALESCE(u.email, '')) = $1"
+          : "UPPER(COALESCE(u.id_number, '')) = $1 OR UPPER(COALESCE(u.student_number, '')) = $1 OR UPPER(COALESCE(u.employee_number, '')) = $1"
+      }
       ORDER BY
         CASE WHEN LOWER(COALESCE(u.status, '')) = 'active' THEN 0 ELSE 1 END,
         u.created_at DESC,
         u.updated_at DESC NULLS LAST
-      LIMIT 1
+      LIMIT 10
     `,
     [normalizedLookup],
   );
 
-  return rows[0] || null;
+  return rows.find((user) => (
+    isEmailLookup
+      ? canUseEmailLogin(user)
+      : canUseIdentifierLogin(user)
+  )) || null;
 }
 
 function getUserDisplayName(user) {
@@ -2989,7 +3017,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   if (!studentId || !password) {
     return res.status(400).json({
-      message: 'An ID/email and password are required.',
+      message: 'A Student/User ID or employee email and password are required.',
     });
   }
 
@@ -2998,7 +3026,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!user) {
       return res.status(401).json({
-        message: 'Invalid ID/email or password.',
+        message: 'Invalid login credentials.',
       });
     }
 
@@ -3025,7 +3053,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!passwordMatches) {
       return res.status(401).json({
-        message: 'Invalid ID/email or password.',
+        message: 'Invalid login credentials.',
       });
     }
 
@@ -3132,7 +3160,8 @@ app.post('/api/auth/guest', async (_req, res) => {
 });
 
 function isAdminUserType(userType) {
-  return userType === 'admin' || userType === 'super_admin';
+  const normalizedUserType = normalizeUserType(userType);
+  return normalizedUserType === 'admin' || normalizedUserType === 'super_admin';
 }
 
 app.post('/api/admin/users', loadAuthenticatedUser, async (req, res) => {

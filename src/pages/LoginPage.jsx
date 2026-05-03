@@ -14,8 +14,8 @@ const pageCopy = {
     icon: Stethoscope,
     title: 'Welcome Back',
     subtitle: 'Sign in to book appointments and manage your infirmary visits.',
-    identifierLabel: 'Student ID / Employee Email',
-    identifierPlaceholder: 'e.g. 23-00275 or employee@email.com',
+    identifierLabel: 'Student/User ID or Employee Email',
+    identifierPlaceholder: 'Student ID or employee@email.com',
     submitLabel: 'Sign In',
     loadingLabel: 'Signing in...',
     forgotLink: '/forgot-password',
@@ -91,7 +91,7 @@ export const LoginPage = ({ variant = 'user' }) => {
       addSystemLog({
         type: isAdmin ? 'admin_login' : 'client_login',
         message: isAdmin ? 'Admin signed in to admin portal' : 'User signed in to client portal',
-        metadata: { studentId: identifier || '(not provided)', userType: userType || 'unknown' },
+        metadata: { loginIdentifier: identifier || '(not provided)', userType: userType || 'unknown' },
       });
 
       toast.success(variant === 'admin' ? 'Admin access granted.' : 'Welcome back! You have signed in successfully.');

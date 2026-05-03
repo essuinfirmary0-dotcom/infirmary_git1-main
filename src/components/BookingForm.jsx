@@ -48,6 +48,7 @@ const SUBCATEGORY_OPTIONS_BY_SERVICE = {
   Dental: ['Consultation'],
   Nutrition: ['Consultation'],
 };
+const EMPLOYEE_FIXED_SUBCATEGORY = 'Consultation';
 
 const commonPurposesByService = {
   Dental: ['Tooth Extraction'],
@@ -124,9 +125,17 @@ const STUDENT_PROGRAM_GROUPS = {
   ],
 };
 const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
+const NON_EMPLOYEE_BOOKING_USER_TYPES = new Set(['guest', 'admin', 'super_admin']);
 
 const isStudentBookingUserType = (userType) =>
   STUDENT_BOOKING_USER_TYPES.has(String(userType || '').trim().toLowerCase());
+
+const isEmployeeBookingUserType = (userType) => {
+  const normalizedUserType = String(userType || '').trim().toLowerCase();
+  return Boolean(normalizedUserType)
+    && !STUDENT_BOOKING_USER_TYPES.has(normalizedUserType)
+    && !NON_EMPLOYEE_BOOKING_USER_TYPES.has(normalizedUserType);
+};
 
 const normalizeDepartmentName = (name) =>
   String(name || '')
@@ -206,6 +215,14 @@ const getDefaultSubcategoryForService = (service) => {
   const options = getAvailableSubcategoryOptions(service);
   return options.length === 1 ? options[0] : '';
 };
+
+const buildSingleValueOptions = (...values) => [
+  ...new Set(
+    values
+      .map((value) => normalizeDepartmentName(value))
+      .filter(Boolean),
+  ),
+];
 
 const supportsRequirementUploads = (service, subcategory) =>
   service === 'Medical' && subcategory === 'Certification';
@@ -516,8 +533,10 @@ const initialFormData = (user) => ({
   guestType: user?.program || '',
   college: user?.college || '',
   program: user?.program || '',
+  department: user?.department || user?.program || '',
+  position: user?.position || '',
   service: user?.userType === 'guest' ? 'Medical' : '',
-  subcategory: '',
+  subcategory: isEmployeeBookingUserType(user?.userType || user?.role) ? EMPLOYEE_FIXED_SUBCATEGORY : '',
   purpose: '',
   timeSlot: '',
   notes: '',
@@ -624,6 +643,7 @@ export const BookingForm = ({
   const submitLockRef = useRef(false);
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
   const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
+  const isEmployeeBookingUser = !isGuestUser && isEmployeeBookingUserType(user?.userType || user?.role);
   const todayDate = getCurrentSystemDate(currentDateTime);
   const todayDateKey = format(todayDate, 'yyyy-MM-dd');
 
@@ -695,17 +715,25 @@ export const BookingForm = ({
   }, []);
 
   useEffect(() => {
-    if (user?.name || user?.program || user?.college || user?.userType === 'guest') {
+    if (user?.name || user?.program || user?.college || user?.department || user?.position || user?.userType === 'guest') {
       setFormData(prev => ({
         ...prev,
         patientName: user?.userType === 'guest' ? prev.patientName : (user?.name || prev.patientName),
         guestType: user?.program || prev.guestType,
         college: isStudentBookingUser ? (user?.college || prev.college) : prev.college,
         program: isStudentBookingUser ? (user?.program || prev.program) : prev.program,
+        ...(isEmployeeBookingUser
+          ? {
+              college: user?.college || prev.college,
+              department: user?.department || user?.program || prev.department,
+              position: user?.position || prev.position,
+              subcategory: prev.service ? EMPLOYEE_FIXED_SUBCATEGORY : prev.subcategory,
+            }
+          : {}),
         service: user?.userType === 'guest' ? 'Medical' : prev.service,
       }));
     }
-  }, [isStudentBookingUser, user]);
+  }, [isEmployeeBookingUser, isStudentBookingUser, user]);
 
   useEffect(() => {
     if (!isRescheduleMode || !rescheduleAppointment) {
@@ -722,8 +750,17 @@ export const BookingForm = ({
       guestType: user?.program || prev.guestType,
       college: isStudentBookingUser ? (user?.college || prev.college) : prev.college,
       program: isStudentBookingUser ? (user?.program || prev.program) : prev.program,
+      ...(isEmployeeBookingUser
+        ? {
+            college: user?.college || prev.college,
+            department: user?.department || user?.program || prev.department,
+            position: user?.position || prev.position,
+          }
+        : {}),
       service: rescheduleAppointment.service || prev.service,
-      subcategory: rescheduleAppointment.subcategory || '',
+      subcategory: isEmployeeBookingUser
+        ? EMPLOYEE_FIXED_SUBCATEGORY
+        : rescheduleAppointment.subcategory || '',
       purpose: rescheduleAppointment.purpose || '',
       timeSlot: rescheduleAppointment.time || '',
       notes: rescheduleAppointment.notes || '',
@@ -732,7 +769,7 @@ export const BookingForm = ({
       chestXray: [],
       urinalysis: [],
     });
-  }, [isGuestUser, isRescheduleMode, isStudentBookingUser, rescheduleAppointment, user]);
+  }, [isEmployeeBookingUser, isGuestUser, isRescheduleMode, isStudentBookingUser, rescheduleAppointment, user]);
 
   const availableStudentPrograms = formData.college
     ? (studentAcademicOptions.programsByCollege[formData.college] || [])
@@ -763,8 +800,13 @@ export const BookingForm = ({
   const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
   const availablePurposes = formData.service ? (purposeOptions[formData.service] || []) : [];
-  const availableSubcategories = getAvailableSubcategoryOptions(formData.service);
+  const availableSubcategories = isEmployeeBookingUser && formData.service
+    ? [EMPLOYEE_FIXED_SUBCATEGORY]
+    : getAvailableSubcategoryOptions(formData.service);
   const isSingleSubcategoryOption = availableSubcategories.length === 1;
+  const employeeCollegeOptions = buildSingleValueOptions(formData.college, user?.college);
+  const employeeDepartmentOptions = buildSingleValueOptions(formData.department, user?.department, user?.program);
+  const employeePositionOptions = buildSingleValueOptions(formData.position, user?.position);
   const requirementFiles = [...requirementFileGroups.chestXray, ...requirementFileGroups.urinalysis];
   const requirementUploadItems = [
     ...requirementFileGroups.chestXray.map((file) => ({ file, label: 'Chest Xray' })),
@@ -776,6 +818,20 @@ export const BookingForm = ({
   );
 
   useEffect(() => {
+    if (isEmployeeBookingUser) {
+      if (!formData.service) {
+        if (formData.subcategory) {
+          setFormData((prev) => ({ ...prev, subcategory: '' }));
+        }
+        return;
+      }
+
+      if (formData.subcategory !== EMPLOYEE_FIXED_SUBCATEGORY) {
+        setFormData((prev) => ({ ...prev, subcategory: EMPLOYEE_FIXED_SUBCATEGORY }));
+      }
+      return;
+    }
+
     const nextOptions = getAvailableSubcategoryOptions(formData.service);
     const nextDefault = nextOptions.length === 1 ? nextOptions[0] : '';
 
@@ -789,7 +845,7 @@ export const BookingForm = ({
     if (!nextOptions.includes(formData.subcategory)) {
       setFormData((prev) => ({ ...prev, subcategory: nextDefault }));
     }
-  }, [formData.service, formData.subcategory]);
+  }, [formData.service, formData.subcategory, isEmployeeBookingUser]);
 
   useEffect(() => {
     if (shouldShowRequirementUpload || requirementFiles.length === 0) {
@@ -1068,7 +1124,7 @@ export const BookingForm = ({
         isGuestUser={isGuestUser}
         guestType={formData.guestType}
         selectedCollege={formData.college}
-        selectedProgram={formData.program}
+        selectedProgram={isEmployeeBookingUser ? formData.department : formData.program}
         isRescheduleMode={isRescheduleMode}
       />
 
@@ -1280,6 +1336,64 @@ export const BookingForm = ({
               </>
             )}
 
+            {isEmployeeBookingUser && (
+              <>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                    <GraduationCap size={16} className="text-primary" />
+                    Department
+                  </label>
+                  <select
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                    value={formData.department}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
+                    disabled={employeeDepartmentOptions.length <= 1}
+                  >
+                    <option value="" disabled>No department on file</option>
+                    {employeeDepartmentOptions.map((department) => (
+                      <option key={department} value={department}>{department}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                    <Building2 size={16} className="text-primary" />
+                    College
+                  </label>
+                  <select
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                    value={formData.college}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
+                    disabled={employeeCollegeOptions.length <= 1}
+                  >
+                    <option value="" disabled>No college on file</option>
+                    {employeeCollegeOptions.map((college) => (
+                      <option key={college} value={college}>{college}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                    <User size={16} className="text-primary" />
+                    Position
+                  </label>
+                  <select
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                    value={formData.position}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, position: e.target.value }))}
+                    disabled={employeePositionOptions.length <= 1}
+                  >
+                    <option value="" disabled>No position on file</option>
+                    {employeePositionOptions.map((position) => (
+                      <option key={position} value={position}>{position}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
             <div className="space-y-4">
               <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
                 <FileText size={16} className="text-primary" />
@@ -1301,7 +1415,9 @@ export const BookingForm = ({
                       setFormData({
                         ...formData,
                         service: s.id,
-                        subcategory: getDefaultSubcategoryForService(s.id),
+                        subcategory: isEmployeeBookingUser
+                          ? EMPLOYEE_FIXED_SUBCATEGORY
+                          : getDefaultSubcategoryForService(s.id),
                         purpose: '',
                       });
                     }}
