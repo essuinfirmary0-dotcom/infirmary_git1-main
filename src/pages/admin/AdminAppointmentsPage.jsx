@@ -48,9 +48,9 @@ const APPOINTMENT_AUDIENCE_SECTIONS = [
   },
   {
     key: 'student',
-    label: 'STUDENT APPOINTMENTS',
-    title: 'Student Appointments',
-    description: 'Session, status, and service filters in this panel apply to student appointments only.',
+    label: 'STUDENT AND EMPLOYEE APPOINTMENTS',
+    title: 'Student and Employee Appointments',
+    description: 'Session, status, and service filters in this panel apply to student and employee appointments only.',
   },
 ];
 const GUEST_APPOINTMENT_SECTION = APPOINTMENT_AUDIENCE_SECTIONS.find((section) => section.key === 'guest');
@@ -768,10 +768,10 @@ export const AdminAppointmentsPage = () => {
       return renderResultSection({
         title: 'Appointment Results',
         appointments: filteredStudentAppointments,
-        emptyMessage: 'No student appointments found for the selected date.',
+        emptyMessage: 'No student or employee appointments found for the selected date.',
         description: filteredStudentAppointments.length > 0
           ? `${Math.min(filteredStudentAppointments.length, COMPACT_VISIBLE_RESULT_COUNT)} of ${filteredStudentAppointments.length} appointment${filteredStudentAppointments.length === 1 ? '' : 's'} visible`
-          : 'No student appointments found for the selected date.',
+          : 'No student or employee appointments found for the selected date.',
         scrollable: filteredStudentAppointments.length > COMPACT_VISIBLE_RESULT_COUNT,
       });
     }
