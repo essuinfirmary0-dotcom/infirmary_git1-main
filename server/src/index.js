@@ -37,6 +37,12 @@ const PASSWORD_SALT_BYTES = 16;
 const APPOINTMENT_CODE_COUNTER_NAME = 'appointments';
 const APPOINTMENT_CODE_PAD_LENGTH = 5;
 const APPOINTMENT_CODE_RETRY_LIMIT = 5;
+const EMPLOYEE_CLAIM_OTP_TTL_MINUTES = Math.min(
+  Math.max(Number(process.env.EMPLOYEE_CLAIM_OTP_TTL_MINUTES || 10), 5),
+  10,
+);
+const EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL = String(process.env.EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL || '').trim();
+const EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN = String(process.env.EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN || '').trim();
 
 fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -145,6 +151,47 @@ function getDefaultPasswordForUser(user) {
   return normalizeCredential(user?.student_number || user?.employee_number || user?.id_number || '');
 }
 
+function normalizeEmail(value) {
+  return normalizeIdentifier(value).toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+}
+
+function hashVerificationCode(email, code) {
+  return crypto
+    .createHash('sha256')
+    .update(`${normalizeEmail(email)}:${normalizeCredential(code)}`)
+    .digest('hex');
+}
+
+function generateVerificationCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function validateEmployeePassword(password) {
+  const value = String(password || '');
+
+  if (value.length < 8) {
+    return 'Password must be at least 8 characters long.';
+  }
+  if (!/[a-z]/.test(value)) {
+    return 'Password must include at least one lowercase letter.';
+  }
+  if (!/[A-Z]/.test(value)) {
+    return 'Password must include at least one uppercase letter.';
+  }
+  if (!/\d/.test(value)) {
+    return 'Password must include at least one number.';
+  }
+  if (!/[^A-Za-z0-9]/.test(value)) {
+    return 'Password must include at least one special character.';
+  }
+
+  return '';
+}
+
 function timingSafeCompare(a, b) {
   const left = Buffer.from(String(a || ''), 'utf8');
   const right = Buffer.from(String(b || ''), 'utf8');
@@ -197,6 +244,13 @@ async function doesPasswordMatch(user, candidatePassword) {
     return {
       matches,
       shouldUpgradeHash: matches,
+    };
+  }
+
+  if (isEmployeeLikeUser(user)) {
+    return {
+      matches: false,
+      shouldUpgradeHash: false,
     };
   }
 
@@ -316,6 +370,9 @@ const AUTH_USER_SELECT = `
     u.role,
     u.status,
     u.password_hash,
+    u.is_activated,
+    u.must_change_password,
+    u.password_changed_at,
     f.department AS faculty_department,
     f.college AS faculty_college,
     f.position AS faculty_position,
@@ -370,6 +427,7 @@ async function findAuthUserByLoginIdentifier(identifier) {
       WHERE UPPER(COALESCE(u.id_number, '')) = $1
          OR UPPER(COALESCE(u.student_number, '')) = $1
          OR UPPER(COALESCE(u.employee_number, '')) = $1
+         OR UPPER(COALESCE(u.email, '')) = $1
       ORDER BY
         CASE WHEN LOWER(COALESCE(u.status, '')) = 'active' THEN 0 ELSE 1 END,
         u.created_at DESC,
@@ -404,6 +462,9 @@ function mapManagedUserRow(user) {
     userType: identity.userType,
     role: user.role || null,
     status: user.status || null,
+    isActivated: user.is_activated !== false,
+    mustChangePassword: Boolean(user.must_change_password),
+    passwordChangedAt: user.password_changed_at || null,
     createdAt: user.created_at || null,
     updatedAt: user.updated_at || null,
   };
@@ -529,6 +590,9 @@ function buildUserPayload(user) {
     idNumber: user.id_number || null,
     role: user.role || null,
     status: user.status || null,
+    isActivated: user.is_activated !== false,
+    mustChangePassword: Boolean(user.must_change_password),
+    passwordChangedAt: user.password_changed_at || null,
   };
 }
 
@@ -851,6 +915,179 @@ async function ensureAppointmentCancellationTracking() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_appointments_cancelled_at
     ON public.appointments(cancelled_at)
+  `);
+}
+
+async function ensureEmployeeAccountOnboardingSchema() {
+  await pool.query(`
+    ALTER TABLE public.users_auth
+    ADD COLUMN IF NOT EXISTS is_activated boolean DEFAULT true NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.users_auth
+    ADD COLUMN IF NOT EXISTS must_change_password boolean DEFAULT false NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.users_auth
+    ALTER COLUMN must_change_password SET DEFAULT false
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.users_auth
+    ADD COLUMN IF NOT EXISTS password_changed_at timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.faculties
+    ADD COLUMN IF NOT EXISTS must_change_password boolean DEFAULT true NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.faculties
+    ALTER COLUMN must_change_password SET DEFAULT true
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.faculties
+    ADD COLUMN IF NOT EXISTS password_changed_at timestamp with time zone
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.employee_claim_tokens (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES public.users_auth(id) ON DELETE CASCADE,
+      email text NOT NULL,
+      code_hash character varying NOT NULL,
+      expires_at timestamp with time zone NOT NULL,
+      consumed_at timestamp with time zone,
+      created_at timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_employee_claim_tokens_user_id
+    ON public.employee_claim_tokens(user_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_employee_claim_tokens_email
+    ON public.employee_claim_tokens(LOWER(email))
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_faculties_email_lower
+    ON public.faculties(LOWER(email))
+  `);
+}
+
+async function syncEmployeeAccountsFromFaculties() {
+  await pool.query(`
+    WITH employee_source AS (
+      SELECT DISTINCT ON (LOWER(TRIM(email)))
+        LOWER(TRIM(email)) AS normalized_email,
+        NULLIF(TRIM(first_name), '') AS first_name,
+        NULLIF(TRIM(middle_name), '') AS middle_name,
+        NULLIF(TRIM(last_name), '') AS last_name,
+        NULLIF(TRIM(faculty_id), '') AS faculty_id,
+        NULLIF(TRIM(contact_number), '') AS contact_number,
+        NULLIF(TRIM(college), '') AS college,
+        NULLIF(TRIM(department), '') AS department
+      FROM public.faculties
+      WHERE NULLIF(TRIM(email), '') IS NOT NULL
+      ORDER BY LOWER(TRIM(email)), updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+    )
+    INSERT INTO public.users_auth (
+      firstname,
+      middle_initial,
+      lastname,
+      id_number,
+      role,
+      user_type,
+      email,
+      phone,
+      college,
+      program,
+      status,
+      password_hash,
+      student_number,
+      employee_number,
+      is_activated,
+      must_change_password,
+      password_changed_at
+    )
+    SELECT
+      first_name,
+      middle_name,
+      last_name,
+      faculty_id,
+      'employee',
+      'employee',
+      normalized_email,
+      contact_number,
+      college,
+      department,
+      'not_activated',
+      NULL,
+      NULL,
+      NULL,
+      false,
+      true,
+      NULL
+    FROM employee_source source
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM public.users_auth existing
+      WHERE LOWER(COALESCE(existing.email, '')) = source.normalized_email
+    )
+    ON CONFLICT (email) DO NOTHING
+  `);
+
+  await pool.query(`
+    WITH employee_source AS (
+      SELECT DISTINCT ON (LOWER(TRIM(email)))
+        LOWER(TRIM(email)) AS normalized_email,
+        NULLIF(TRIM(first_name), '') AS first_name,
+        NULLIF(TRIM(middle_name), '') AS middle_name,
+        NULLIF(TRIM(last_name), '') AS last_name,
+        NULLIF(TRIM(faculty_id), '') AS faculty_id,
+        NULLIF(TRIM(contact_number), '') AS contact_number,
+        NULLIF(TRIM(college), '') AS college,
+        NULLIF(TRIM(department), '') AS department
+      FROM public.faculties
+      WHERE NULLIF(TRIM(email), '') IS NOT NULL
+      ORDER BY LOWER(TRIM(email)), updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+    )
+    UPDATE public.users_auth u
+    SET firstname = COALESCE(source.first_name, u.firstname),
+        middle_initial = COALESCE(source.middle_name, u.middle_initial),
+        lastname = COALESCE(source.last_name, u.lastname),
+        id_number = COALESCE(source.faculty_id, u.id_number),
+        role = 'employee',
+        user_type = 'employee',
+        phone = COALESCE(source.contact_number, u.phone),
+        college = COALESCE(source.college, u.college),
+        program = COALESCE(source.department, u.program),
+        status = CASE WHEN u.password_hash IS NULL THEN 'not_activated' ELSE u.status END,
+        is_activated = CASE WHEN u.password_hash IS NULL THEN false ELSE COALESCE(u.is_activated, true) END,
+        must_change_password = CASE WHEN u.password_hash IS NULL THEN true ELSE COALESCE(u.must_change_password, false) END,
+        updated_at = NOW()
+    FROM employee_source source
+    WHERE LOWER(COALESCE(u.email, '')) = source.normalized_email
+      AND COALESCE(u.user_type, u.role, '') NOT IN ('admin', 'super_admin')
+  `);
+
+  await pool.query(`
+    UPDATE public.faculties f
+    SET auth_user_id = u.id,
+        must_change_password = u.must_change_password,
+        password_changed_at = u.password_changed_at,
+        updated_at = NOW()
+    FROM public.users_auth u
+    WHERE LOWER(COALESCE(f.email, '')) = LOWER(COALESCE(u.email, ''))
+      AND NULLIF(TRIM(f.email), '') IS NOT NULL
+      AND COALESCE(u.user_type, u.role, '') NOT IN ('admin', 'super_admin')
   `);
 }
 
@@ -2251,13 +2488,508 @@ async function getInitialAppointmentStatus() {
   return toDatabaseAppointmentStatus('Approved');
 }
 
+async function findEmployeeRecordByEmail(email, client = pool) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const { rows } = await client.query(
+    `
+      SELECT
+        id,
+        auth_user_id,
+        faculty_id,
+        email,
+        first_name,
+        last_name,
+        middle_name,
+        department,
+        college,
+        position,
+        contact_number,
+        academic_rank,
+        designation,
+        must_change_password,
+        password_changed_at
+      FROM public.faculties
+      WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [normalizedEmail],
+  );
+
+  return rows[0] || null;
+}
+
+async function fetchAuthUserByEmail(email, client = pool) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const { rows } = await client.query(
+    `
+      SELECT
+        id,
+        firstname,
+        middle_initial,
+        lastname,
+        email,
+        user_type,
+        role,
+        status,
+        password_hash,
+        is_activated,
+        must_change_password
+      FROM public.users_auth
+      WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [normalizedEmail],
+  );
+
+  return rows[0] || null;
+}
+
+function buildEmployeeAccountValues(employee) {
+  const normalizedEmail = normalizeEmail(employee?.email);
+  const firstName = normalizeIdentifier(employee?.first_name);
+  const middleName = normalizeIdentifier(employee?.middle_name);
+  const lastName = normalizeIdentifier(employee?.last_name);
+  const department = normalizeIdentifier(employee?.department);
+  const college = normalizeIdentifier(employee?.college);
+  const position = normalizeIdentifier(employee?.position)
+    || normalizeIdentifier(employee?.designation)
+    || normalizeIdentifier(employee?.academic_rank)
+    || 'Employee';
+
+  return {
+    email: normalizedEmail,
+    firstName,
+    middleName,
+    lastName,
+    idNumber: normalizeIdentifier(employee?.faculty_id) || null,
+    department,
+    college,
+    position,
+    phone: normalizeIdentifier(employee?.contact_number),
+  };
+}
+
+async function ensureEmployeeAccountForEmail(email, client = pool) {
+  const employee = await findEmployeeRecordByEmail(email, client);
+  if (!employee) {
+    return { employee: null, userId: null };
+  }
+
+  const values = buildEmployeeAccountValues(employee);
+  let user = null;
+
+  if (employee.auth_user_id) {
+    const existingById = await client.query(
+      `
+        SELECT id, user_type, role
+        FROM public.users_auth
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [employee.auth_user_id],
+    );
+    user = existingById.rows[0] || null;
+  }
+
+  if (!user) {
+    user = await fetchAuthUserByEmail(values.email, client);
+  }
+
+  if (user && isAdminUserType(user.user_type || user.role)) {
+    throw new Error('This email is already assigned to an administrator account.');
+  }
+
+  if (!user) {
+    const inserted = await client.query(
+      `
+        INSERT INTO public.users_auth (
+          firstname,
+          middle_initial,
+          lastname,
+          id_number,
+          role,
+          user_type,
+          email,
+          phone,
+          college,
+          program,
+          status,
+          password_hash,
+          student_number,
+          employee_number,
+          is_activated,
+          must_change_password,
+          password_changed_at
+        )
+        VALUES (
+          NULLIF($1, ''),
+          NULLIF($2, ''),
+          NULLIF($3, ''),
+          $4,
+          'employee',
+          'employee',
+          $5,
+          NULLIF($6, ''),
+          NULLIF($7, ''),
+          NULLIF($8, ''),
+          'not_activated',
+          NULL,
+          NULL,
+          NULL,
+          false,
+          true,
+          NULL
+        )
+        RETURNING id
+      `,
+      [
+        values.firstName,
+        values.middleName,
+        values.lastName,
+        values.idNumber,
+        values.email,
+        values.phone,
+        values.college,
+        values.department,
+      ],
+    );
+    user = inserted.rows[0];
+  } else {
+    const updated = await client.query(
+      `
+        UPDATE public.users_auth
+        SET firstname = COALESCE(NULLIF($2, ''), firstname),
+            middle_initial = COALESCE(NULLIF($3, ''), middle_initial),
+            lastname = COALESCE(NULLIF($4, ''), lastname),
+            id_number = COALESCE($5, id_number),
+            role = 'employee',
+            user_type = 'employee',
+            email = $6,
+            phone = COALESCE(NULLIF($7, ''), phone),
+            college = COALESCE(NULLIF($8, ''), college),
+            program = COALESCE(NULLIF($9, ''), program),
+            status = CASE
+              WHEN password_hash IS NULL THEN 'not_activated'
+              ELSE status
+            END,
+            is_activated = CASE
+              WHEN password_hash IS NULL THEN false
+              ELSE COALESCE(is_activated, true)
+            END,
+            must_change_password = CASE
+              WHEN password_hash IS NULL THEN true
+              ELSE COALESCE(must_change_password, false)
+            END,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [
+        user.id,
+        values.firstName,
+        values.middleName,
+        values.lastName,
+        values.idNumber,
+        values.email,
+        values.phone,
+        values.college,
+        values.department,
+      ],
+    );
+    user = updated.rows[0];
+  }
+
+  await client.query(
+    `
+      UPDATE public.faculties
+      SET auth_user_id = $2,
+          must_change_password = COALESCE(
+            (SELECT ua.must_change_password FROM public.users_auth ua WHERE ua.id = $2),
+            true
+          ),
+          updated_at = NOW()
+      WHERE id = $1
+    `,
+    [employee.id, user.id],
+  );
+
+  return { employee, userId: user.id };
+}
+
+async function sendEmployeeClaimVerificationEmail({ email, code, expiresInMinutes }) {
+  const subject = 'Infirmary Connect employee account verification';
+  const text = [
+    'Use this verification code to claim your Infirmary Connect employee account:',
+    '',
+    code,
+    '',
+    `This code expires in ${expiresInMinutes} minutes.`,
+    'If you did not request this, please ignore this email.',
+  ].join('\n');
+  const html = `
+    <p>Use this verification code to claim your Infirmary Connect employee account:</p>
+    <p style="font-size:24px;font-weight:700;letter-spacing:4px;">${code}</p>
+    <p>This code expires in ${expiresInMinutes} minutes.</p>
+    <p>If you did not request this, please ignore this email.</p>
+  `;
+
+  if (!EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL) {
+    console.log(`Employee claim OTP for ${email}: ${code}`);
+    if (isProduction) {
+      throw new Error('Employee claim email delivery is not configured.');
+    }
+    return { delivered: false, devOtp: code };
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+  if (EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN) {
+    headers.Authorization = `Bearer ${EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN}`;
+  }
+
+  const response = await fetch(EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      to: email,
+      subject,
+      text,
+      html,
+      purpose: 'employee_account_claim',
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Employee claim email delivery failed: ${response.status}${detail ? ` ${detail}` : ''}`);
+  }
+
+  return { delivered: true };
+}
+
+async function findValidEmployeeClaimToken({ email, code }, client = pool) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = normalizeCredential(code);
+  if (!normalizedEmail || !normalizedCode) {
+    return null;
+  }
+
+  const { rows } = await client.query(
+    `
+      SELECT
+        t.id,
+        t.user_id,
+        t.email,
+        u.status,
+        u.is_activated,
+        u.must_change_password
+      FROM public.employee_claim_tokens t
+      JOIN public.users_auth u ON u.id = t.user_id
+      JOIN public.faculties f ON f.auth_user_id = u.id
+      WHERE LOWER(t.email) = LOWER($1)
+        AND LOWER(COALESCE(f.email, '')) = LOWER($1)
+        AND t.code_hash = $2
+        AND t.consumed_at IS NULL
+        AND t.expires_at > NOW()
+      ORDER BY t.created_at DESC
+      LIMIT 1
+    `,
+    [normalizedEmail, hashVerificationCode(normalizedEmail, normalizedCode)],
+  );
+
+  return rows[0] || null;
+}
+
+app.post('/api/auth/employee-claim/request', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ message: 'Please enter a valid registered email address.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { employee, userId } = await ensureEmployeeAccountForEmail(email, client);
+    if (!employee || !userId) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        message: 'No employee account was found for this email. Please contact the system administrator.',
+      });
+    }
+
+    const code = generateVerificationCode();
+    const codeHash = hashVerificationCode(email, code);
+
+    await client.query(
+      `
+        UPDATE public.employee_claim_tokens
+        SET consumed_at = NOW()
+        WHERE user_id = $1
+          AND consumed_at IS NULL
+      `,
+      [userId],
+    );
+
+    await client.query(
+      `
+        INSERT INTO public.employee_claim_tokens (user_id, email, code_hash, expires_at)
+        VALUES ($1, $2, $3, NOW() + ($4 || ' minutes')::interval)
+      `,
+      [userId, email, codeHash, EMPLOYEE_CLAIM_OTP_TTL_MINUTES],
+    );
+
+    const delivery = await sendEmployeeClaimVerificationEmail({
+      email,
+      code,
+      expiresInMinutes: EMPLOYEE_CLAIM_OTP_TTL_MINUTES,
+    });
+
+    await client.query('COMMIT');
+
+    return res.json({
+      message: `Verification code sent to ${email}.`,
+      expiresInMinutes: EMPLOYEE_CLAIM_OTP_TTL_MINUTES,
+      devOtp: delivery.devOtp || undefined,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({
+      message: 'Failed to start employee account claiming.',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/auth/employee-claim/verify', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const code = normalizeCredential(req.body?.code);
+
+  if (!isValidEmail(email) || !code) {
+    return res.status(400).json({ message: 'Registered email and verification code are required.' });
+  }
+
+  try {
+    const token = await findValidEmployeeClaimToken({ email, code });
+    if (!token) {
+      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+    }
+
+    return res.json({
+      ok: true,
+      message: 'Email verified. Please create your password.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to verify employee account.', error: error.message });
+  }
+});
+
+app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const code = normalizeCredential(req.body?.code);
+  const password = String(req.body?.password || '');
+  const confirmPassword = String(req.body?.confirmPassword || '');
+
+  if (!isValidEmail(email) || !code || !password || !confirmPassword) {
+    return res.status(400).json({ message: 'Email, verification code, password, and confirmation are required.' });
+  }
+
+  if (password !== confirmPassword) {
+    return res.status(400).json({ message: 'Passwords do not match.' });
+  }
+
+  const passwordError = validateEmployeePassword(password);
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const token = await findValidEmployeeClaimToken({ email, code }, client);
+    if (!token) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+    }
+
+    const passwordHash = hashPassword(password);
+    const updated = await client.query(
+      `
+        UPDATE public.users_auth
+        SET password_hash = $2,
+            status = 'active',
+            is_activated = true,
+            must_change_password = false,
+            password_changed_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [token.user_id, passwordHash],
+    );
+
+    await client.query(
+      `
+        UPDATE public.faculties
+        SET must_change_password = false,
+            password_changed_at = NOW(),
+            updated_at = NOW()
+        WHERE auth_user_id = $1
+          AND LOWER(COALESCE(email, '')) = LOWER($2)
+      `,
+      [token.user_id, email],
+    );
+
+    await client.query(
+      `
+        UPDATE public.employee_claim_tokens
+        SET consumed_at = NOW()
+        WHERE id = $1
+      `,
+      [token.id],
+    );
+
+    await client.query('COMMIT');
+
+    const user = (await fetchAuthUserById(updated.rows[0].id)) || updated.rows[0];
+    const sessionToken = createSessionToken(user, email);
+
+    return res.json({
+      message: 'Employee account activated successfully.',
+      token: sessionToken,
+      user: buildUserPayload(user),
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ message: 'Failed to activate employee account.', error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/auth/login', async (req, res) => {
-  const studentId = normalizeIdentifier(req.body?.studentId);
+  const studentId = normalizeIdentifier(req.body?.studentId || req.body?.email);
   const password = normalizeCredential(req.body?.password);
 
   if (!studentId || !password) {
     return res.status(400).json({
-      message: 'An ID and password are required.',
+      message: 'An ID/email and password are required.',
     });
   }
 
@@ -2266,7 +2998,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!user) {
       return res.status(401).json({
-        message: 'Invalid ID or password.',
+        message: 'Invalid ID/email or password.',
       });
     }
 
@@ -2276,11 +3008,24 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    if (
+      isEmployeeLikeUser(user) &&
+      (
+        user.is_activated === false ||
+        String(user.status || '').trim().toLowerCase() === 'not_activated' ||
+        Boolean(user.must_change_password)
+      )
+    ) {
+      return res.status(403).json({
+        message: 'Please claim your employee account and create a password before signing in.',
+      });
+    }
+
     const { matches: passwordMatches, shouldUpgradeHash } = await doesPasswordMatch(user, password);
 
     if (!passwordMatches) {
       return res.status(401).json({
-        message: 'Invalid ID or password.',
+        message: 'Invalid ID/email or password.',
       });
     }
 
@@ -2309,7 +3054,9 @@ app.post('/api/auth/login', async (req, res) => {
           ? 'Admin signed in.'
           : 'User signed in.',
       changedData: {
-        loginId: user.id_number || user.student_number || user.employee_number || studentId,
+        loginId: isEmployeeLikeUser(user)
+          ? user.email || studentId
+          : user.id_number || user.student_number || user.employee_number || studentId,
         userType: user.user_type || user.role || 'student',
       },
       targetType: isAdminUserType(user.user_type || user.role) ? 'admin' : 'user',
@@ -4908,6 +5655,12 @@ async function runStartupMaintenance() {
 
     console.log('Running ensureAppointmentCancellationTracking...');
     await ensureAppointmentCancellationTracking();
+
+    console.log('Running ensureEmployeeAccountOnboardingSchema...');
+    await ensureEmployeeAccountOnboardingSchema();
+
+    console.log('Running syncEmployeeAccountsFromFaculties...');
+    await syncEmployeeAccountsFromFaculties();
 
     console.log('Running ensureAppointmentStatusFlow...');
     await ensureAppointmentStatusFlow();

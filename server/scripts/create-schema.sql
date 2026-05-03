@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS public.medical_record_attachments CASCADE;
 DROP TABLE IF EXISTS public.medical_records CASCADE;
 DROP TABLE IF EXISTS public.consultation_logs CASCADE;
 DROP TABLE IF EXISTS public.password_reset_tokens CASCADE;
+DROP TABLE IF EXISTS public.employee_claim_tokens CASCADE;
 DROP TABLE IF EXISTS public.appointments CASCADE;
 DROP TABLE IF EXISTS public.slot_definitions CASCADE;
 DROP TABLE IF EXISTS public.attendance_records CASCADE;
@@ -50,6 +51,9 @@ CREATE TABLE public.users_auth (
   employee_number character varying UNIQUE DEFAULT ('EM-'::text || lpad((nextval('employee_number_seq'::regclass))::text, 5, '0'::text)),
   college character varying,
   program character varying,
+  is_activated boolean NOT NULL DEFAULT true,
+  must_change_password boolean NOT NULL DEFAULT false,
+  password_changed_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -79,7 +83,7 @@ CREATE TABLE public.faculties (
   academic_rank text,
   designation text,
   password_changed_at timestamp with time zone,
-  must_change_password boolean NOT NULL DEFAULT false,
+  must_change_password boolean NOT NULL DEFAULT true,
   program_head_id uuid,
   department_id uuid REFERENCES public.departments(id) ON DELETE SET NULL
 );
@@ -172,6 +176,16 @@ CREATE TABLE public.password_reset_tokens (
   created_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
+CREATE TABLE public.employee_claim_tokens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.users_auth(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  code_hash character varying NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  consumed_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
 CREATE TABLE public.queues (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.users_auth(id) ON DELETE CASCADE,
@@ -196,6 +210,9 @@ CREATE TABLE public.admin_activity_logs (
 CREATE INDEX idx_users_auth_department_program ON public.users_auth(department_program);
 CREATE INDEX idx_users_auth_email ON public.users_auth(email);
 CREATE INDEX idx_users_auth_id_number ON public.users_auth(id_number);
+CREATE INDEX idx_faculties_email_lower ON public.faculties(LOWER(email));
+CREATE INDEX idx_employee_claim_tokens_user_id ON public.employee_claim_tokens(user_id);
+CREATE INDEX idx_employee_claim_tokens_email ON public.employee_claim_tokens(LOWER(email));
 CREATE INDEX idx_attendance_records_user_id ON public.attendance_records(user_id);
 CREATE INDEX idx_attendance_records_scan_datetime ON public.attendance_records(scan_datetime);
 CREATE INDEX idx_appointments_user_id ON public.appointments(user_id);

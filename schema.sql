@@ -207,7 +207,7 @@ CREATE TABLE public.faculties (
     academic_rank text,
     designation text,
     password_changed_at timestamp with time zone,
-    must_change_password boolean DEFAULT false NOT NULL,
+    must_change_password boolean DEFAULT true NOT NULL,
     program_head_id uuid,
     department_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL
@@ -274,6 +274,21 @@ CREATE TABLE public.password_reset_tokens (
     user_id uuid NOT NULL,
     token_hash character varying NOT NULL,
     expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: employee_claim_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_claim_tokens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    email text NOT NULL,
+    code_hash character varying NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -347,6 +362,9 @@ CREATE TABLE public.users_auth (
     employee_number character varying DEFAULT ('EM-'::text || lpad((nextval('public.employee_number_seq'::regclass))::text, 5, '0'::text)),
     college character varying,
     program character varying,
+    is_activated boolean DEFAULT true NOT NULL,
+    must_change_password boolean DEFAULT false NOT NULL,
+    password_changed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -465,6 +483,14 @@ ALTER TABLE ONLY public.password_reset_tokens
 
 
 --
+-- Name: employee_claim_tokens employee_claim_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_claim_tokens
+    ADD CONSTRAINT employee_claim_tokens_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: queues queues_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -574,6 +600,27 @@ CREATE INDEX idx_users_auth_department_program ON public.users_auth USING btree 
 --
 
 CREATE INDEX idx_users_auth_email ON public.users_auth USING btree (email);
+
+
+--
+-- Name: idx_faculties_email_lower; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_faculties_email_lower ON public.faculties USING btree (lower(email));
+
+
+--
+-- Name: idx_employee_claim_tokens_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_employee_claim_tokens_user_id ON public.employee_claim_tokens USING btree (user_id);
+
+
+--
+-- Name: idx_employee_claim_tokens_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_employee_claim_tokens_email ON public.employee_claim_tokens USING btree (lower(email));
 
 
 --
@@ -723,6 +770,14 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.password_reset_tokens
     ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users_auth(id) ON DELETE CASCADE;
+
+
+--
+-- Name: employee_claim_tokens employee_claim_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_claim_tokens
+    ADD CONSTRAINT employee_claim_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users_auth(id) ON DELETE CASCADE;
 
 
 --

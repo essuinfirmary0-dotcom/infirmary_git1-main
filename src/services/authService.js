@@ -13,6 +13,23 @@ export const authService = {
     const { data } = await api.post('/api/auth/guest');
     return data;
   },
+  requestEmployeeClaim: async (email) => {
+    const { data } = await api.post('/api/auth/employee-claim/request', { email });
+    return data;
+  },
+  verifyEmployeeClaim: async ({ email, code }) => {
+    const { data } = await api.post('/api/auth/employee-claim/verify', { email, code });
+    return data;
+  },
+  setupEmployeePassword: async ({ email, code, password, confirmPassword }) => {
+    const { data } = await api.post('/api/auth/employee-claim/setup-password', {
+      email,
+      code,
+      password,
+      confirmPassword,
+    });
+    return data;
+  },
   forgotPassword: async (email) => {
     const { data } = await api.post('/api/auth/forgot-password', { email });
     return data;

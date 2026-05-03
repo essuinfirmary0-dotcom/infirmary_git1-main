@@ -269,8 +269,119 @@ function findDepartmentId(row, departmentMap) {
   return null;
 }
 
+async function upsertEmployeeAuthAccount(client, row) {
+  const email = nullIfBlank(row.email)?.toLowerCase();
+  if (!email) {
+    return null;
+  }
+
+  const { rows } = await client.query(
+    `
+      INSERT INTO public.users_auth (
+        lastname,
+        firstname,
+        middle_initial,
+        id_number,
+        role,
+        user_type,
+        email,
+        phone,
+        college,
+        program,
+        status,
+        password_hash,
+        student_number,
+        employee_number,
+        is_activated,
+        must_change_password,
+        password_changed_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        'employee',
+        'employee',
+        $5,
+        $6,
+        $7,
+        $8,
+        'not_activated',
+        NULL,
+        NULL,
+        NULL,
+        false,
+        true,
+        NULL
+      )
+      ON CONFLICT (email) DO UPDATE
+      SET lastname = COALESCE(EXCLUDED.lastname, public.users_auth.lastname),
+          firstname = COALESCE(EXCLUDED.firstname, public.users_auth.firstname),
+          middle_initial = COALESCE(EXCLUDED.middle_initial, public.users_auth.middle_initial),
+          id_number = COALESCE(EXCLUDED.id_number, public.users_auth.id_number),
+          phone = COALESCE(EXCLUDED.phone, public.users_auth.phone),
+          college = COALESCE(EXCLUDED.college, public.users_auth.college),
+          program = COALESCE(EXCLUDED.program, public.users_auth.program),
+          role = CASE
+            WHEN COALESCE(public.users_auth.user_type, public.users_auth.role, '') IN ('admin', 'super_admin')
+              THEN public.users_auth.role
+            ELSE 'employee'
+          END,
+          user_type = CASE
+            WHEN COALESCE(public.users_auth.user_type, public.users_auth.role, '') IN ('admin', 'super_admin')
+              THEN public.users_auth.user_type
+            ELSE 'employee'
+          END,
+          status = CASE
+            WHEN COALESCE(public.users_auth.user_type, public.users_auth.role, '') IN ('admin', 'super_admin')
+              THEN public.users_auth.status
+            WHEN public.users_auth.password_hash IS NULL
+              THEN 'not_activated'
+            ELSE public.users_auth.status
+          END,
+          is_activated = CASE
+            WHEN COALESCE(public.users_auth.user_type, public.users_auth.role, '') IN ('admin', 'super_admin')
+              THEN public.users_auth.is_activated
+            WHEN public.users_auth.password_hash IS NULL
+              THEN false
+            ELSE COALESCE(public.users_auth.is_activated, true)
+          END,
+          must_change_password = CASE
+            WHEN COALESCE(public.users_auth.user_type, public.users_auth.role, '') IN ('admin', 'super_admin')
+              THEN public.users_auth.must_change_password
+            WHEN public.users_auth.password_hash IS NULL
+              THEN true
+            ELSE COALESCE(public.users_auth.must_change_password, false)
+          END,
+          updated_at = now()
+      RETURNING id, user_type, role, must_change_password
+    `,
+    [
+      nullIfBlank(row.last_name),
+      nullIfBlank(row.first_name),
+      nullIfBlank(row.middle_name),
+      nullIfBlank(row.faculty_id),
+      email,
+      nullIfBlank(row.contact_number),
+      nullIfBlank(row.college),
+      nullIfBlank(row.department),
+    ],
+  );
+
+  const account = rows[0] || null;
+  if (!account || ['admin', 'super_admin'].includes(account.user_type || account.role)) {
+    return null;
+  }
+
+  return account;
+}
+
 async function upsertFaculties(client, faculties, departmentMap) {
   for (const row of faculties) {
+    const authAccount = await upsertEmployeeAuthAccount(client, row);
+    const authUserId = authAccount?.id || null;
+
     await client.query(
       `
         INSERT INTO public.faculties (
@@ -338,7 +449,7 @@ async function upsertFaculties(client, faculties, departmentMap) {
       `,
       [
         row.id,
-        nullIfBlank(row.auth_user_id),
+        authUserId || nullIfBlank(row.auth_user_id),
         nullIfBlank(row.faculty_id),
         nullIfBlank(row.email),
         nullIfBlank(row.first_name),
@@ -361,7 +472,7 @@ async function upsertFaculties(client, faculties, departmentMap) {
         nullIfBlank(row.academic_rank),
         nullIfBlank(row.designation),
         nullIfBlank(row.password_changed_at),
-        nullIfBlank(row.must_change_password),
+        authUserId ? authAccount.must_change_password : nullIfBlank(row.must_change_password),
         nullIfBlank(row.program_head_id),
         findDepartmentId(row, departmentMap),
       ],
