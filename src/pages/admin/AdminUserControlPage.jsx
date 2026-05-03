@@ -237,6 +237,9 @@ export const AdminUserControlPage = () => {
             paginatedClientUsers.map((account) => {
               const isBlocked = account.status === 'blocked';
               const actionBusy = busyAction.startsWith(`user:${account.id}:`);
+              const normalizedUserType = String(account.userType || account.role || '').trim().toLowerCase();
+              const isEmployeeAccount = normalizedUserType
+                && !['student', 'new', 'old', 'guest', 'admin', 'super_admin'].includes(normalizedUserType);
 
               return (
                 <div
@@ -268,11 +271,15 @@ export const AdminUserControlPage = () => {
                         </div>
                         <div className="flex items-center gap-2 text-slate-600">
                           <UserSquare2 size={16} className="text-slate-400 shrink-0" />
-                          <span className="font-medium">Login ID: {account.idNumber || '—'}</span>
+                          <span className="font-medium">
+                            {isEmployeeAccount ? `Email: ${account.email || '—'}` : `Login ID: ${account.idNumber || '—'}`}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 text-slate-600">
                           <GraduationCap size={16} className="text-slate-400 shrink-0" />
-                          <span className="font-medium">Student No.: {account.studentNumber || account.employeeNumber || '—'}</span>
+                          <span className="font-medium">
+                            {isEmployeeAccount ? `Email: ${account.email || '—'}` : `Student No.: ${account.studentNumber || '—'}`}
+                          </span>
                         </div>
                       </div>
 

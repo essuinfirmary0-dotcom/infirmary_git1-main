@@ -1,4 +1,4 @@
-import { isGuestUser, isStudentUser } from './userIdentity';
+import { isEmployeeUser, isGuestUser, isStudentUser } from './userIdentity';
 
 const STUDENT_USER_TYPES = new Set(['student', 'new', 'old']);
 
@@ -21,6 +21,9 @@ function inferReceiptType(user = {}) {
   if (isStudentUser(user) || cleanValue(user.studentNumber)) {
     return 'student';
   }
+  if (isEmployeeUser(user)) {
+    return 'employee';
+  }
 
   return '';
 }
@@ -29,6 +32,14 @@ export function resolveKioskReceiptIdentity(user = {}) {
   const inferredType = inferReceiptType(user);
   const explicitLabel = cleanValue(user.receiptIdLabel);
   const explicitValue = cleanValue(user.receiptIdValue);
+
+  if (inferredType === 'employee') {
+    return {
+      type: 'employee',
+      label: 'Email',
+      value: cleanValue(user.email),
+    };
+  }
 
   if (explicitLabel && explicitValue) {
     return {

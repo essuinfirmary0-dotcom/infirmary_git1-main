@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authService } from '../services/authService';
 
 export function formatIdInput(raw) {
-  return raw.toUpperCase().trimStart();
+  const value = String(raw || '').trimStart();
+  return value.includes('@') ? value : value.toUpperCase();
 }
 
 /** Decode checkIn=… from query string (handles NS%2D123-style encoding). */
@@ -39,7 +40,7 @@ function extractIdFromKioskUrl(text) {
     const checkIn = u.searchParams.get('checkIn');
     if (checkIn && typeof checkIn === 'string') {
       const t = checkIn.trim();
-      if (t) return t.toUpperCase();
+      if (t) return t.includes('@') ? t.toLowerCase() : t.toUpperCase();
     }
   } catch {
     return null;
@@ -65,6 +66,9 @@ export function extractIdFromScanInput(raw) {
   const directMatch = text.match(/\b(?:NS-\d{5,}|EM-\d{5,}|\d{2,4}-\d{4,6}|\d{7,8})\b/i);
   if (directMatch?.[0]) return directMatch[0].toUpperCase();
 
+  const emailMatch = text.match(/[^\s@]+@[^\s@]+\.[^\s@]+/i);
+  if (emailMatch?.[0]) return emailMatch[0].toLowerCase();
+
   const checkInRaw = extractIdFromCheckInQueryParam(text);
   if (checkInRaw && checkInRaw !== text) {
     const fromParam = extractIdFromScanInput(checkInRaw);
@@ -80,11 +84,10 @@ export function extractIdFromScanInput(raw) {
       const candidate =
         parsed.studentNumber ||
         parsed.student_number ||
-        parsed.employeeNumber ||
-        parsed.employee_number ||
+        parsed.email ||
         null;
       if (typeof candidate === 'string' && candidate.trim()) {
-        return candidate.trim().toUpperCase();
+        return candidate.includes('@') ? candidate.trim().toLowerCase() : candidate.trim().toUpperCase();
       }
     }
   } catch {

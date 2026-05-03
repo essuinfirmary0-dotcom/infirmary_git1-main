@@ -88,6 +88,7 @@ export const AdminConsultationPage = () => {
               ...log,
               patientName: patient.name,
               patientEmail: patient.email,
+              email: patient.email,
               studentNumber: patient.studentNumber || null,
               employeeNumber: patient.employeeNumber || null,
               idNumber: patient.idNumber || null,

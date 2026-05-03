@@ -602,7 +602,7 @@ function buildUserPayload(user) {
     userType,
     pictureUrl: user.picture_url || null,
     studentNumber: studentUser ? actualIdentifier : null,
-    employeeNumber: employeeUser ? actualIdentifier : null,
+    employeeNumber: null,
     college: studentUser
       ? normalizeIdentifier(user.college) || normalizeIdentifier(user.faculty_college) || ''
       : normalizeIdentifier(user.faculty_college) || normalizeIdentifier(user.college) || '',
@@ -612,10 +612,14 @@ function buildUserPayload(user) {
     department: employeeUser ? resolveEmployeeDepartment(user) : '',
     position: employeeUser ? resolveEmployeePosition(user) : '',
     qrCode: user.qr_code || null,
-    qrData: guestUser ? normalizeIdentifier(user.qr_data) || actualIdentifier : actualIdentifier || normalizeIdentifier(user.qr_data) || null,
+    qrData: employeeUser
+      ? normalizeEmail(user.email) || null
+      : guestUser
+        ? normalizeIdentifier(user.qr_data) || actualIdentifier
+        : actualIdentifier || normalizeIdentifier(user.qr_data) || null,
     phone: user.phone || '',
     address: user.address || '',
-    idNumber: user.id_number || null,
+    idNumber: employeeUser ? null : user.id_number || null,
     role: user.role || null,
     status: user.status || null,
     isActivated: user.is_activated !== false,
@@ -662,8 +666,8 @@ function resolveKioskReceiptIdentity(user) {
   if (isEmployeeLikeUser(user)) {
     return {
       type: 'employee',
-      label: 'Employee Number',
-      value: identity.employeeNumber || identity.idNumber || null,
+      label: 'Email',
+      value: normalizeEmail(user?.email) || null,
     };
   }
 
@@ -680,9 +684,10 @@ function buildKioskUserPayload(user) {
   return {
     id: user.id,
     name: [user.firstname, user.middle_initial, user.lastname].filter(Boolean).join(' ') || user.email || user.id_number || 'Guest',
+    email: user.email || '',
     userType: getEffectiveUserType(user) || receiptIdentity.type || null,
     studentNumber: receiptIdentity.type === 'student' ? receiptIdentity.value : null,
-    employeeNumber: receiptIdentity.type === 'employee' ? receiptIdentity.value : null,
+    employeeNumber: null,
     guestId: receiptIdentity.type === 'guest' ? receiptIdentity.value : null,
     receiptIdType: receiptIdentity.type,
     receiptIdLabel: receiptIdentity.label,
@@ -728,6 +733,7 @@ function mapAppointmentRow(row) {
     status: mapAppointmentStatusFromDatabase(row.status, row.cancelled_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    email: row.appointment_email || '',
     slotDefinitionId: row.slot_definition_id || null,
     cancelledAt: row.cancelled_at || null,
     cancellationReason: row.cancellation_reason || '',
@@ -1808,6 +1814,7 @@ async function findKioskUserByIdentifier(identifier) {
       WHERE UPPER(COALESCE(student_number, '')) = UPPER($1)
          OR UPPER(COALESCE(employee_number, '')) = UPPER($1)
          OR UPPER(COALESCE(id_number, '')) = UPPER($1)
+         OR LOWER(COALESCE(email, '')) = LOWER($1)
          OR COALESCE(qr_data, '') = $1
       ORDER BY created_at ASC
       LIMIT 1
@@ -4583,6 +4590,7 @@ app.get('/api/appointments', loadAuthenticatedUser, async (req, res) => {
           a.*,
           u.college AS appointment_college,
           u.program AS appointment_program,
+          u.email AS appointment_email,
           u.student_number AS appointment_student_number,
           u.employee_number AS appointment_employee_number,
           u.id_number AS appointment_id_number,
@@ -4616,6 +4624,7 @@ app.get('/api/appointments/all', loadAuthenticatedUser, async (req, res) => {
           a.*,
           u.college AS appointment_college,
           u.program AS appointment_program,
+          u.email AS appointment_email,
           u.student_number AS appointment_student_number,
           u.employee_number AS appointment_employee_number,
           u.id_number AS appointment_id_number,

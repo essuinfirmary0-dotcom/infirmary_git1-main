@@ -26,6 +26,7 @@ import {
 const resolveQueueReceiptProfile = (queue) =>
   resolveKioskReceiptProfile({
     userType: queue?.user?.userType,
+    email: queue?.user?.email,
     studentNumber: queue?.user?.studentNumber,
     employeeNumber: queue?.user?.employeeNumber,
     idNumber: queue?.user?.idNumber,

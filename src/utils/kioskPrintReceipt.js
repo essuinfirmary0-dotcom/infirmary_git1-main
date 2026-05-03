@@ -26,8 +26,9 @@ export function buildKioskReceiptPayload(kioskResult) {
     user: {
       name: user.name || 'Guest',
       userType: user.userType || receiptIdentity.type || '',
+      email: user.email || '',
       studentNumber: receiptIdentity.type === 'student' ? receiptIdentity.value : '',
-      employeeNumber: receiptIdentity.type === 'employee' ? receiptIdentity.value : '',
+      employeeNumber: '',
       guestId: receiptIdentity.type === 'guest' ? receiptIdentity.value : '',
       receiptIdType: receiptIdentity.type || '',
       receiptIdLabel: receiptIdentity.label || '',

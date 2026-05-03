@@ -47,9 +47,10 @@ export function resolveDisplayIdentifier(user = {}) {
   const idNumber = cleanValue(user.idNumber);
   const studentNumber = cleanValue(user.studentNumber);
   const employeeNumber = cleanValue(user.employeeNumber);
+  const email = cleanValue(user.email);
 
   if (isEmployeeUser(user)) {
-    return pickActualIdentifier(idNumber, employeeNumber, studentNumber) || idNumber;
+    return email;
   }
 
   return pickActualIdentifier(idNumber, studentNumber, employeeNumber) || idNumber;
@@ -60,17 +61,18 @@ export function getRoleIdentityInfo(user = {}) {
   const guestUser = isGuestUser(user);
   const studentUser = isStudentUser(user);
   const identifier = resolveDisplayIdentifier(user);
+  const employeeEmail = cleanValue(user.email);
 
   return {
     isEmployeeUser: employeeUser,
     isGuestUser: guestUser,
     isStudentUser: studentUser,
     identifierLabel: employeeUser
-      ? 'Employee Number'
+      ? 'Email'
       : studentUser
         ? 'Student ID Number'
         : 'ID Number',
-    identifierValue: identifier,
+    identifierValue: employeeUser ? employeeEmail : identifier,
     position: employeeUser ? cleanValue(user.position) || cleanValue(user.role) : '',
     department: employeeUser ? cleanValue(user.department) || cleanValue(user.program) || cleanValue(user.college) : '',
     college: studentUser ? cleanValue(user.college) : '',
