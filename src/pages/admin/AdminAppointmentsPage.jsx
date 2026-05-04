@@ -277,7 +277,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
                 </div>
                 {appointment.status && (
                   <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
-                    {getAppointmentStatusLabel(appointment.status)}
+                    {getAppointmentStatusLabel(appointment.status, appointment.cancellationReason)}
                   </span>
                 )}
               </div>
@@ -305,7 +305,7 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
 
                 <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                  <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved')}</p>
+                  <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved', appointment.cancellationReason)}</p>
                 </div>
               </div>
             </div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Calendar, Clock, User, Stethoscope, Apple, Activity, Trash2, RefreshCw, PlayCircle, CheckCircle, X, Ticket, MapPin, ClipboardList, Tag, FileText, IdCard, Building2, GraduationCap, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isValid, parseISO } from 'date-fns';
-import { getAppointmentStatusLabel } from '../utils/appointmentStatus';
+import { getAppointmentStatusLabel, isAbsenceVoidedAppointment } from '../utils/appointmentStatus';
 import { QUEUE_DISPLAY_STATUSES } from '../utils/queueStatus';
 
 const safeFormat = (date, formatStr) => {
@@ -119,7 +119,7 @@ const isCancellableAppointment = (appointment) => {
   return evaluateScheduledAppointmentState(appointment.date, appointment.time).status === 'upcoming';
 };
 
-const StatusBadge = ({ status }) => {
+const StatusBadge = ({ status, cancellationReason = '' }) => {
   const styles = {
     'Approved': 'bg-amber-50 text-amber-700 border-amber-100',
     'Confirmed': 'bg-blue-50 text-blue-600 border-blue-100',
@@ -139,7 +139,7 @@ const StatusBadge = ({ status }) => {
   return (
     <span className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${styles[status] || 'bg-slate-50 text-slate-600'}`}>
       {icons[status]}
-      {getAppointmentStatusLabel(status)}
+      {getAppointmentStatusLabel(status, cancellationReason)}
     </span>
   );
 };
@@ -221,7 +221,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
                   <div>
                     <h2 className="text-2xl font-bold text-slate-800">Appointment Details</h2>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <StatusBadge status={appointment.status} />
+                      <StatusBadge status={appointment.status} cancellationReason={appointment.cancellationReason} />
                       <QueueStatusBadge status={queueDisplayStatus} />
                     </div>
                   </div>
@@ -509,7 +509,7 @@ const AppointmentDetailPanel = ({ appointment, user, onReschedule, onCancel, onC
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={appointment.status} />
+          <StatusBadge status={appointment.status} cancellationReason={appointment.cancellationReason} />
           <QueueStatusBadge status={queueDisplayStatus} />
           {appointment.queueNumber && (
             <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
@@ -526,7 +526,7 @@ const AppointmentDetailPanel = ({ appointment, user, onReschedule, onCancel, onC
         <AppointmentDetailField label="Time" value={appointment.time} />
         <AppointmentDetailField label="Service" value={serviceLabel} />
         <AppointmentDetailField label="Purpose" value={appointment.purpose} />
-        <AppointmentDetailField label="Status" value={getAppointmentStatusLabel(appointment.status)} />
+        <AppointmentDetailField label="Status" value={getAppointmentStatusLabel(appointment.status, appointment.cancellationReason)} />
         {queueDisplayStatus && (
           <AppointmentDetailField label="Queue Status" value={queueDisplayStatus} />
         )}
@@ -650,7 +650,7 @@ export const AppointmentList = ({
                   <p className="truncate text-sm font-semibold text-slate-700">{apt.service || 'No service'}</p>
                   <p className="text-sm font-semibold text-slate-700">{safeFormat(apt.date, 'MMM d, yyyy')}</p>
                   <div className="flex items-center justify-between gap-3">
-                    <StatusBadge status={apt.status} />
+                    <StatusBadge status={apt.status} cancellationReason={apt.cancellationReason} />
                     <ChevronRight
                       size={16}
                       className={`shrink-0 text-slate-300 transition-transform ${isSelected ? 'rotate-90 text-primary' : ''}`}
@@ -682,7 +682,7 @@ export const AppointmentList = ({
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
                       <div className="mt-1">
-                        <StatusBadge status={apt.status} />
+                        <StatusBadge status={apt.status} cancellationReason={apt.cancellationReason} />
                       </div>
                     </div>
                   </div>
@@ -752,7 +752,7 @@ export const AppointmentList = ({
                   <ServiceIcon service={apt.service} />
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
-                  <StatusBadge status={apt.status} />
+                  <StatusBadge status={apt.status} cancellationReason={apt.cancellationReason} />
                   <div className="flex items-center gap-1.5">
                     {apt.appointmentCode && (
                       <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
@@ -828,7 +828,9 @@ export const AppointmentList = ({
 
             {isClient && apt.status === 'Cancelled' && (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
-                This appointment was voided. If you still need this service, please create a new appointment.
+                {isAbsenceVoidedAppointment(apt)
+                  ? 'This appointment was voided due to absence because you did not check in within your scheduled appointment time.'
+                  : 'This appointment was voided. If you still need this service, please create a new appointment.'}
               </div>
             )}
 

@@ -96,7 +96,7 @@ function KioskResultBlock({ kioskResult, tone = 'light' }) {
                 : ''}
             </p>
             <p className={isDark ? 'text-[11px] text-white/50' : 'text-[11px] text-slate-500'}>
-              Status: {getAppointmentStatusLabel(kioskResult.appointment.status)}
+              Status: {getAppointmentStatusLabel(kioskResult.appointment.status, kioskResult.appointment.cancellationReason)}
             </p>
           </div>
         ) : null}
@@ -366,7 +366,7 @@ export function ReceiptOverlay({ kioskResult, onClose }) {
                     Status
                   </p>
                   <p className="text-xs font-semibold text-slate-800">
-                    {getAppointmentStatusLabel(result.appointment.status)}
+                    {getAppointmentStatusLabel(result.appointment.status, result.appointment.cancellationReason)}
                   </p>
                 </div>
                 <div className="space-y-0.5 col-span-2">

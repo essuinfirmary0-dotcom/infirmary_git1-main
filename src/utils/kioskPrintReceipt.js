@@ -43,7 +43,8 @@ export function buildKioskReceiptPayload(kioskResult) {
           service: appointment.service || '',
           subcategory: appointment.subcategory || '',
           status: appointment.status || '',
-          statusLabel: getAppointmentStatusLabel(appointment.status || ''),
+          statusLabel: getAppointmentStatusLabel(appointment.status || '', appointment.cancellationReason),
+          cancellationReason: appointment.cancellationReason || '',
         }
       : null,
   };
@@ -73,7 +74,7 @@ function buildKioskReceiptDocumentHtml(kioskResult) {
   if (kioskResult.hasAppointmentToday && apt) {
     const code = escapeHtml(apt.code || '');
     const time = escapeHtml(apt.time || '');
-    const status = escapeHtml(getAppointmentStatusLabel(apt.status || ''));
+    const status = escapeHtml(getAppointmentStatusLabel(apt.status || '', apt.cancellationReason));
     const svc = escapeHtml(
       [apt.service, apt.subcategory].filter(Boolean).join(' - ')
     );

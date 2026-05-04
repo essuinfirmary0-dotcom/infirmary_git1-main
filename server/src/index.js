@@ -511,6 +511,9 @@ const DEFAULT_TIME_SLOTS = [
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
 const DISPLAY_APPOINTMENT_STATUSES = ['Approved', 'Confirmed', 'Completed', 'Cancelled'];
+const ABSENCE_VOID_STATUS_LABEL = 'Voided due to Absence';
+const ABSENCE_VOID_NOTIFICATION_MESSAGE = 'Your appointment has been voided due to absence. You did not check in within your scheduled appointment time.';
+const ABSENCE_VOID_CANCELLATION_REASON = 'Voided due to absence because the user did not check in within the scheduled appointment time.';
 
 function parseAuthToken(token) {
   try {
@@ -731,6 +734,7 @@ function mapAppointmentRow(row) {
     time: formatTimeSlotLabel(row.time_slot),
     notes: row.notes || '',
     status: mapAppointmentStatusFromDatabase(row.status, row.cancelled_at),
+    statusLabel: getAppointmentStatusDisplayLabel(row.status, row.cancellation_reason),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     email: row.appointment_email || '',
@@ -754,6 +758,80 @@ function mapAppointmentStatusFromDatabase(status, cancelledAt = null) {
   if (['Confirmed', 'Ongoing'].includes(normalized)) return 'Confirmed';
   if (['Approved', 'Waiting'].includes(normalized)) return 'Approved';
   return normalized || 'Approved';
+}
+
+function isAbsenceVoidReason(reason) {
+  const normalizedReason = normalizeIdentifier(reason).toLowerCase();
+  return normalizedReason.includes('absence')
+    || normalizedReason.includes('absent')
+    || normalizedReason.includes('did not check in')
+    || normalizedReason.includes('missed');
+}
+
+function getAppointmentStatusDisplayLabel(status, cancellationReason = '') {
+  const normalizedStatus = mapAppointmentStatusFromDatabase(status);
+  if (normalizedStatus === 'Cancelled' && isAbsenceVoidReason(cancellationReason)) {
+    return ABSENCE_VOID_STATUS_LABEL;
+  }
+  if (normalizedStatus === 'Confirmed') return 'In Line';
+  if (normalizedStatus === 'Cancelled') return 'Voided';
+  return normalizedStatus;
+}
+
+function formatAppointmentDateForNotification(dateValue) {
+  const rawDate = normalizeIdentifier(dateValue);
+  if (!rawDate) return 'the scheduled date';
+
+  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+    ? new Date(`${rawDate}T00:00:00+08:00`)
+    : new Date(rawDate);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return rawDate;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'Asia/Manila',
+  }).format(parsedDate);
+}
+
+function formatTimeSlotForNotification(timeSlot) {
+  const normalizedTimeSlot = formatTimeSlotLabel(timeSlot);
+  return normalizedTimeSlot.replace(/\s+-\s+/, ' to ');
+}
+
+function buildAbsenceVoidNotificationMessage(appointment) {
+  const dateLabel = formatAppointmentDateForNotification(appointment?.appointment_date);
+  const timeLabel = formatTimeSlotForNotification(appointment?.time_slot);
+  const serviceLabel = [
+    normalizeIdentifier(appointment?.service),
+    normalizeIdentifier(appointment?.subcategory),
+  ].filter(Boolean).join(' ');
+  const purpose = normalizeIdentifier(appointment?.purpose);
+
+  return [
+    ABSENCE_VOID_NOTIFICATION_MESSAGE,
+    `Appointment: ${dateLabel}${timeLabel ? ` from ${timeLabel}` : ''}${serviceLabel ? ` for ${serviceLabel}` : ''}.`,
+    purpose ? `Purpose: ${purpose}.` : '',
+    `Status: ${ABSENCE_VOID_STATUS_LABEL}.`,
+  ].filter(Boolean).join(' ');
+}
+
+async function notifyAppointmentVoidedDueToAbsence(appointment) {
+  if (!appointment?.user_id || !appointment?.id) {
+    return null;
+  }
+
+  return createNotification({
+    userId: appointment.user_id,
+    type: 'appointment_status',
+    title: 'Appointment voided due to absence',
+    message: buildAbsenceVoidNotificationMessage(appointment),
+    appointmentId: appointment.id,
+  });
 }
 
 async function toDatabaseAppointmentStatus(status) {
@@ -1198,6 +1276,8 @@ function mapKioskAppointment(appointment) {
     purpose: appointment.purpose || '',
     notes: appointment.notes || '',
     status: mapAppointmentStatusFromDatabase(appointment.status, appointment.cancelled_at),
+    statusLabel: getAppointmentStatusDisplayLabel(appointment.status, appointment.cancellation_reason),
+    cancellationReason: appointment.cancellation_reason || '',
   };
 }
 
@@ -1977,7 +2057,7 @@ async function syncAppointmentStatusFromQueue(client, queueId, queueStatus, appo
   }
 
   const isCancelledFlow = derivedAppointmentStatus === 'Cancelled';
-  const defaultCancellationReason = 'Automatically cancelled after the scheduled appointment time slot was missed.';
+  const defaultCancellationReason = ABSENCE_VOID_CANCELLATION_REASON;
 
   if (appointmentId) {
     const { rows } = await client.query(
@@ -2193,7 +2273,7 @@ async function getSlotDefinitions() {
 
 function buildMissedAppointmentNote(existingNotes, timeSlot, dateLabel = 'today') {
   const base = normalizeIdentifier(existingNotes);
-  const reasonLine = `Auto-cancelled after missing the ${timeSlot} appointment window on ${dateLabel}.`;
+  const reasonLine = `Voided due to absence after missing the ${timeSlot} appointment window on ${dateLabel}.`;
   if (!base) return reasonLine;
   if (base.includes(reasonLine)) return base;
   return `${base}\n${reasonLine}`;
@@ -2210,7 +2290,7 @@ async function markMissedAppointmentsAsCancelled() {
 
     const { rows } = await client.query(
       `
-        SELECT id, user_id, appointment_date, time_slot, notes
+        SELECT id, user_id, appointment_date, time_slot, service, subcategory, purpose, notes
         FROM public.appointments
         WHERE cancelled_at IS NULL
           AND status NOT IN ('Completed', 'Cancelled')
@@ -2238,6 +2318,8 @@ async function markMissedAppointmentsAsCancelled() {
       return nowMinutes > slotRange.endMinutes;
     });
 
+    const voidedAppointments = [];
+
     for (const appointment of missedAppointments) {
       const queueLookup = await client.query(
         `
@@ -2261,24 +2343,35 @@ async function markMissedAppointmentsAsCancelled() {
       }
 
       const dateLabel = appointment.appointment_date || today;
-      await client.query(
+      const updatedAppointment = await client.query(
         `
           UPDATE public.appointments
           SET status = $2,
               notes = NULLIF($3, ''),
               cancelled_at = COALESCE(cancelled_at, now()),
-              cancellation_reason = COALESCE(cancellation_reason, 'Automatically cancelled after the scheduled appointment time slot was missed.')
+              cancellation_reason = COALESCE(cancellation_reason, $4)
           WHERE id = $1
+          RETURNING *
         `,
         [
           appointment.id,
           missedStatus,
           buildMissedAppointmentNote(appointment.notes, appointment.time_slot, dateLabel),
+          ABSENCE_VOID_CANCELLATION_REASON,
         ],
       );
+
+      if (updatedAppointment.rows[0]) {
+        voidedAppointments.push(updatedAppointment.rows[0]);
+      }
     }
 
     await client.query('COMMIT');
+
+    await Promise.allSettled(
+      voidedAppointments.map((appointment) => notifyAppointmentVoidedDueToAbsence(appointment)),
+    );
+
     return missedAppointments.length;
   } catch (error) {
     await client.query('ROLLBACK');
@@ -4014,23 +4107,22 @@ app.post('/api/kiosk/check-in', async (req, res) => {
         await client.query('COMMIT');
 
         if (updatedAppointment?.user_id) {
-          await createNotification({
-            userId: updatedAppointment.user_id,
-            type: 'appointment_status',
-            title: 'Appointment cancelled',
-            message: `Your ${appointment.time_slot} appointment was cancelled because you arrived after the selected time window.`,
-            appointmentId: updatedAppointment.id,
-          });
+          await notifyAppointmentVoidedDueToAbsence(updatedAppointment);
         }
 
         return res.status(409).json({
-          code: 'APPOINTMENT_CANCELLED',
-          message: `Your selected appointment time was ${appointment.time_slot}. Because you arrived after that time window, your appointment has been cancelled.`,
+          code: 'APPOINTMENT_VOIDED_ABSENT',
+          message: ABSENCE_VOID_NOTIFICATION_MESSAGE,
           cancelled: true,
           queueNumber: updatedQueue.rows[0]?.queue_number || queueRow.queue_number || '',
           user: buildKioskUserPayload(user),
           hasAppointmentToday: true,
-          appointment: mapKioskAppointment(updatedAppointment || { ...appointment, status: 'Cancelled', cancelled_at: new Date().toISOString() }),
+          appointment: mapKioskAppointment(updatedAppointment || {
+            ...appointment,
+            status: 'Cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancellation_reason: ABSENCE_VOID_CANCELLATION_REASON,
+          }),
         });
       } catch (error) {
         await client.query('ROLLBACK');
@@ -4092,14 +4184,53 @@ app.post('/api/kiosk/confirm-check-in', async (req, res) => {
     }
 
     if (arrivalWindow.status === 'missed') {
-      return res.status(409).json({
-        code: 'APPOINTMENT_CANCELLED',
-        message: `Your selected appointment time was ${appointment.time_slot}. This appointment can no longer be checked in because the time window has already passed.`,
-        cancelled: true,
-        user: buildKioskUserPayload(user),
-        hasAppointmentToday: true,
-        appointment: mapKioskAppointment(appointment),
-      });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const queueRow = await ensureQueueForAppointmentWithClient(client, appointment);
+        const updatedQueue = await client.query(
+          `
+            UPDATE public.queues
+            SET status = 'Cancelled'
+            WHERE id = $1
+            RETURNING *
+          `,
+          [queueRow.id],
+        );
+        const updatedAppointment = await syncAppointmentStatusFromQueue(
+          client,
+          updatedQueue.rows[0]?.id || queueRow.id,
+          'Cancelled',
+          appointment.id,
+        );
+        await client.query('COMMIT');
+
+        if (updatedAppointment?.user_id) {
+          await notifyAppointmentVoidedDueToAbsence(updatedAppointment);
+        }
+
+        return res.status(409).json({
+          code: 'APPOINTMENT_VOIDED_ABSENT',
+          message: ABSENCE_VOID_NOTIFICATION_MESSAGE,
+          cancelled: true,
+          user: buildKioskUserPayload(user),
+          hasAppointmentToday: true,
+          appointment: mapKioskAppointment(updatedAppointment || {
+            ...appointment,
+            status: 'Cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancellation_reason: ABSENCE_VOID_CANCELLATION_REASON,
+          }),
+        });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({
+          message: 'Failed to update the missed appointment status.',
+          error: error.message,
+        });
+      } finally {
+        client.release();
+      }
     }
 
     return res.json(await finalizeKioskCheckIn({ user, appointment }));
