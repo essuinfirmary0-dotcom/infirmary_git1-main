@@ -121,6 +121,7 @@ export const AdminRecordsPage = () => {
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(false);
   const [recordsSearchQuery, setRecordsSearchQuery] = useState('');
+  const [recordsSubmittedSearchQuery, setRecordsSubmittedSearchQuery] = useState('');
   const [selectedRecordUser, setSelectedRecordUser] = useState(null);
   const [apiRecords, setApiRecords] = useState([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
@@ -165,7 +166,7 @@ export const AdminRecordsPage = () => {
   }, []);
 
   const recordsSearchedUsers = useMemo(() => {
-    const q = recordsSearchQuery.trim().toLowerCase();
+    const q = recordsSubmittedSearchQuery.trim().toLowerCase();
     if (!q) return [];
     return (patients || []).filter(
       (user) =>
@@ -173,7 +174,7 @@ export const AdminRecordsPage = () => {
         user.email?.toLowerCase().includes(q) ||
         resolveDisplayIdentifier(user)?.toLowerCase().includes(q)
     );
-  }, [recordsSearchQuery, patients]);
+  }, [recordsSubmittedSearchQuery, patients]);
 
   useEffect(() => {
     if (!selectedRecordUser) {
@@ -254,7 +255,8 @@ export const AdminRecordsPage = () => {
           ]
         : [];
   const selectedRecordUserIdentifierText = getPatientIdentifierText(selectedRecordUser);
-  const isSearchStage = recordsSearchQuery.trim() !== '' && !selectedRecordUser;
+  const hasSubmittedRecordsSearch = recordsSubmittedSearchQuery.trim() !== '';
+  const isSearchStage = hasSubmittedRecordsSearch && !selectedRecordUser;
 
   useEffect(() => {
     let cancelled = false;
@@ -306,6 +308,17 @@ export const AdminRecordsPage = () => {
   const handleRecordsSearchChange = (e) => {
     const nextQuery = e.target.value;
     setRecordsSearchQuery(nextQuery);
+    setRecordsSubmittedSearchQuery('');
+
+    if (selectedRecordUser || selectedRecordTile || isAddingRecord) {
+      resetRecordWorkspaceState({ clearSelectedUser: true });
+    }
+  };
+
+  const handleRecordsSearchSubmit = (e) => {
+    e.preventDefault();
+    const nextQuery = recordsSearchQuery.trim();
+    setRecordsSubmittedSearchQuery(nextQuery);
 
     if (selectedRecordUser || selectedRecordTile || isAddingRecord) {
       resetRecordWorkspaceState({ clearSelectedUser: true });
@@ -511,18 +524,26 @@ export const AdminRecordsPage = () => {
               {patientsLoading ? 'Loading patient list...' : `${patients.length} patients available`}
             </div>
           </div>
-          <div className="relative group">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" size={20} />
+          <form className="relative group" onSubmit={handleRecordsSearchSubmit}>
             <input
               type="text"
               placeholder="Search by name, student ID, or email..."
               value={recordsSearchQuery}
               onChange={handleRecordsSearchChange}
-              className="w-full pl-14 pr-5 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm sm:text-base font-medium text-slate-700 shadow-sm placeholder:text-slate-400"
+              className="w-full pl-5 pr-14 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-sm sm:text-base font-medium text-slate-700 shadow-sm placeholder:text-slate-400"
             />
-          </div>
+            <button
+              type="submit"
+              disabled={patientsLoading || recordsSearchQuery.trim() === ''}
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition-all hover:bg-primary-hover disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed"
+              aria-label="Search patient"
+              title="Search patient"
+            >
+              <Search size={18} />
+            </button>
+          </form>
           <div className="space-y-2">
-            {recordsSearchedUsers.length > 0 ? (
+            {hasSubmittedRecordsSearch && recordsSearchedUsers.length > 0 ? (
               <div className="space-y-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Results</p>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -547,10 +568,10 @@ export const AdminRecordsPage = () => {
                   ))}
                 </div>
               </div>
-            ) : recordsSearchQuery.trim() !== '' ? (
+            ) : hasSubmittedRecordsSearch ? (
               <div className="text-center py-4 text-slate-400 font-bold text-sm">No patients found.</div>
             ) : (
-              <div className="text-center py-4 text-slate-400 font-bold text-sm">Start typing to search for a patient.</div>
+              <div className="text-center py-4 text-slate-400 font-bold text-sm">Enter a keyword, then click search.</div>
             )}
           </div>
         </div>
