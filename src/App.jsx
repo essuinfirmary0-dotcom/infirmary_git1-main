@@ -9,6 +9,7 @@ import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { EmployeePasswordSetupPage } from './pages/EmployeePasswordSetupPage';
 import { ClientDashboardPage } from './pages/ClientDashboardPage';
 import { ClientBookPage } from './pages/ClientBookPage';
 import { ClientAppointmentsPage } from './pages/ClientAppointmentsPage';
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/signup" element={<Navigate to="/login/user" replace />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/employee-setup-password" element={<EmployeePasswordSetupPage />} />
         </Route>
 
         {/* Client dashboard: sidebar + header + Outlet */}

@@ -49,14 +49,11 @@ export const LoginPage = ({ variant = 'user' }) => {
   const [loading, setLoading] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
   const [employeeClaimOpen, setEmployeeClaimOpen] = useState(false);
-  const [employeeClaimStep, setEmployeeClaimStep] = useState('email');
   const [employeeClaimEmail, setEmployeeClaimEmail] = useState('');
-  const [employeeClaimCode, setEmployeeClaimCode] = useState('');
-  const [employeeClaimPassword, setEmployeeClaimPassword] = useState('');
-  const [employeeClaimConfirmPassword, setEmployeeClaimConfirmPassword] = useState('');
   const [employeeClaimLoading, setEmployeeClaimLoading] = useState(false);
   const [employeeClaimMessage, setEmployeeClaimMessage] = useState('');
   const [employeeClaimMessageType, setEmployeeClaimMessageType] = useState('info');
+  const [employeeClaimSetupLink, setEmployeeClaimSetupLink] = useState('');
 
   const copy = useMemo(() => pageCopy[variant] || pageCopy.user, [variant]);
   const Icon = copy.icon;
@@ -138,13 +135,10 @@ export const LoginPage = ({ variant = 'user' }) => {
   };
 
   const resetEmployeeClaim = () => {
-    setEmployeeClaimStep('email');
     setEmployeeClaimEmail('');
-    setEmployeeClaimCode('');
-    setEmployeeClaimPassword('');
-    setEmployeeClaimConfirmPassword('');
     setEmployeeClaimMessage('');
     setEmployeeClaimMessageType('info');
+    setEmployeeClaimSetupLink('');
   };
 
   const handleEmployeeClaimRequest = async (event) => {
@@ -153,77 +147,18 @@ export const LoginPage = ({ variant = 'user' }) => {
       setEmployeeClaimLoading(true);
       setEmployeeClaimMessage('');
       setEmployeeClaimMessageType('info');
+      setEmployeeClaimSetupLink('');
       const result = await authService.requestEmployeeClaim(employeeClaimEmail.trim());
-      setEmployeeClaimStep('code');
-      setEmployeeClaimMessageType(result?.devOtp ? 'info' : 'success');
+      setEmployeeClaimSetupLink(result?.devSetupLink || '');
+      setEmployeeClaimMessageType(result?.devSetupLink ? 'info' : 'success');
       setEmployeeClaimMessage(
-        result?.devOtp
-          ? `Development OTP: ${result.devOtp}`
-          : result?.message || 'Verification code sent. Please check your email.',
+        result?.devSetupLink
+          ? 'Email delivery is not configured locally. Use the development setup link below.'
+          : result?.message || 'Password setup link sent. Please check your email.',
       );
-      toast.success('Verification code sent.');
+      toast.success(result?.devSetupLink ? 'Password setup link ready.' : 'Password setup link sent.');
     } catch (err) {
       const message = err.response?.data?.message || 'Failed to start employee account claiming.';
-      setEmployeeClaimMessageType('error');
-      setEmployeeClaimMessage(message);
-      toast.error(message);
-    } finally {
-      setEmployeeClaimLoading(false);
-    }
-  };
-
-  const handleEmployeeClaimVerify = async (event) => {
-    event.preventDefault();
-    try {
-      setEmployeeClaimLoading(true);
-      await authService.verifyEmployeeClaim({
-        email: employeeClaimEmail.trim(),
-        code: employeeClaimCode.trim(),
-      });
-      setEmployeeClaimStep('password');
-      setEmployeeClaimMessageType('success');
-      setEmployeeClaimMessage('Email verified. Create your password to activate the account.');
-      toast.success('Email verified.');
-    } catch (err) {
-      const message = err.response?.data?.message || 'Invalid or expired verification code.';
-      setEmployeeClaimMessageType('error');
-      setEmployeeClaimMessage(message);
-      toast.error(message);
-    } finally {
-      setEmployeeClaimLoading(false);
-    }
-  };
-
-  const handleEmployeeClaimPasswordSetup = async (event) => {
-    event.preventDefault();
-    try {
-      setEmployeeClaimLoading(true);
-      const result = await authService.setupEmployeePassword({
-        email: employeeClaimEmail.trim(),
-        code: employeeClaimCode.trim(),
-        password: employeeClaimPassword,
-        confirmPassword: employeeClaimConfirmPassword,
-      });
-
-      if (result?.token) {
-        localStorage.setItem('authToken', result.token);
-      }
-      if (result?.user) {
-        setStoredAuthUser(result.user);
-      }
-
-      addSystemLog({
-        type: 'client_login',
-        message: 'Employee claimed account and signed in',
-        metadata: { userType: result?.user?.userType || 'employee', email: employeeClaimEmail.trim() },
-      });
-
-      toast.success(result?.message || 'Employee account activated successfully.');
-      resetEmployeeClaim();
-      setEmployeeClaimOpen(false);
-      navigate('/app');
-    } catch (err) {
-      const message = err.response?.data?.message || 'Failed to activate employee account.';
       setEmployeeClaimMessageType('error');
       setEmployeeClaimMessage(message);
       toast.error(message);
@@ -481,10 +416,14 @@ export const LoginPage = ({ variant = 'user' }) => {
           <button
             type="button"
             onClick={() => {
+              if (employeeClaimOpen) {
+                resetEmployeeClaim();
+              }
               setEmployeeClaimOpen((open) => !open);
               if (!employeeClaimOpen) {
                 setEmployeeClaimMessage('');
                 setEmployeeClaimMessageType('info');
+                setEmployeeClaimSetupLink('');
               }
             }}
             disabled={loading || guestLoading || employeeClaimLoading}
@@ -497,109 +436,36 @@ export const LoginPage = ({ variant = 'user' }) => {
           {employeeClaimOpen && (
             <div className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm space-y-4">
               <div>
-                <p className="text-sm font-black text-slate-800">Employee Account Claim</p>
+                <p className="text-sm font-black text-slate-800">Claim Employee Account</p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Use the email already registered in the employee records.
+                  Enter the email already registered in the employee records. A password setup link will be sent to your email to activate your account.
                 </p>
               </div>
 
-              {employeeClaimStep === 'email' && (
-                <form className="space-y-3" onSubmit={handleEmployeeClaimRequest}>
-                  <label className="space-y-1.5 block">
-                    <span className="text-[11px] font-black text-slate-600 uppercase tracking-[0.1em]">Registered Email</span>
-                    <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                      <input
-                        type="email"
-                        required
-                        value={employeeClaimEmail}
-                        onChange={(e) => setEmployeeClaimEmail(e.target.value)}
-                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary text-sm font-medium"
-                        placeholder="employee@email.com"
-                        autoComplete="email"
-                      />
-                    </div>
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={employeeClaimLoading}
-                    className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 transition-all text-sm disabled:opacity-60"
-                  >
-                    {employeeClaimLoading ? 'Sending code...' : 'Send Verification Code'}
-                  </button>
-                </form>
-              )}
-
-              {employeeClaimStep === 'code' && (
-                <form className="space-y-3" onSubmit={handleEmployeeClaimVerify}>
-                  <label className="space-y-1.5 block">
-                    <span className="text-[11px] font-black text-slate-600 uppercase tracking-[0.1em]">Verification Code</span>
+              <form className="space-y-3" onSubmit={handleEmployeeClaimRequest}>
+                <label className="space-y-1.5 block">
+                  <span className="text-[11px] font-black text-slate-600 uppercase tracking-[0.1em]">Registered Email</span>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
                     <input
-                      type="text"
+                      type="email"
                       required
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={employeeClaimCode}
-                      onChange={(e) => setEmployeeClaimCode(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary text-sm font-black tracking-[0.3em]"
-                      placeholder="000000"
+                      value={employeeClaimEmail}
+                      onChange={(e) => setEmployeeClaimEmail(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary text-sm font-medium"
+                      placeholder="employee@email.com"
+                      autoComplete="email"
                     />
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEmployeeClaimStep('email')}
-                      className="px-4 py-3 rounded-xl border border-slate-200 text-slate-600 text-sm font-black hover:bg-slate-50"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={employeeClaimLoading}
-                      className="flex-1 py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 transition-all text-sm disabled:opacity-60"
-                    >
-                      {employeeClaimLoading ? 'Verifying...' : 'Verify Email'}
-                    </button>
                   </div>
-                </form>
-              )}
-
-              {employeeClaimStep === 'password' && (
-                <form className="space-y-3" onSubmit={handleEmployeeClaimPasswordSetup}>
-                  <label className="space-y-1.5 block">
-                    <span className="text-[11px] font-black text-slate-600 uppercase tracking-[0.1em]">Create Password</span>
-                    <input
-                      type="password"
-                      required
-                      value={employeeClaimPassword}
-                      onChange={(e) => setEmployeeClaimPassword(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary text-sm font-medium"
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  <label className="space-y-1.5 block">
-                    <span className="text-[11px] font-black text-slate-600 uppercase tracking-[0.1em]">Confirm Password</span>
-                    <input
-                      type="password"
-                      required
-                      value={employeeClaimConfirmPassword}
-                      onChange={(e) => setEmployeeClaimConfirmPassword(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary text-sm font-medium"
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  <p className="text-[11px] leading-relaxed text-slate-500">
-                    Passwords need at least 8 characters, uppercase and lowercase letters, a number, and a special character.
-                  </p>
-                  <button
-                    type="submit"
-                    disabled={employeeClaimLoading}
-                    className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 transition-all text-sm disabled:opacity-60"
-                  >
-                    {employeeClaimLoading ? 'Activating...' : 'Activate Account'}
-                  </button>
-                </form>
-              )}
+                </label>
+                <button
+                  type="submit"
+                  disabled={employeeClaimLoading}
+                  className="w-full py-3 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 transition-all text-sm disabled:opacity-60"
+                >
+                  {employeeClaimLoading ? 'Activating...' : 'Activate Account'}
+                </button>
+              </form>
 
               {employeeClaimMessage && (
                 <p
@@ -613,6 +479,14 @@ export const LoginPage = ({ variant = 'user' }) => {
                 >
                   {employeeClaimMessage}
                 </p>
+              )}
+              {employeeClaimSetupLink && (
+                <a
+                  href={employeeClaimSetupLink}
+                  className="block rounded-xl border border-sky-100 bg-white px-3 py-2 text-xs font-black text-sky-700 break-all hover:bg-sky-50"
+                >
+                  Open password setup link
+                </a>
               )}
             </div>
           )}

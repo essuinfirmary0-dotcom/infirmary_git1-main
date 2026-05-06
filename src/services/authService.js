@@ -17,14 +17,9 @@ export const authService = {
     const { data } = await api.post('/api/auth/employee-claim/request', { email });
     return data;
   },
-  verifyEmployeeClaim: async ({ email, code }) => {
-    const { data } = await api.post('/api/auth/employee-claim/verify', { email, code });
-    return data;
-  },
-  setupEmployeePassword: async ({ email, code, password, confirmPassword }) => {
+  setupEmployeePassword: async ({ token, password, confirmPassword }) => {
     const { data } = await api.post('/api/auth/employee-claim/setup-password', {
-      email,
-      code,
+      token,
       password,
       confirmPassword,
     });

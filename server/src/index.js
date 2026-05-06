@@ -37,10 +37,17 @@ const PASSWORD_SALT_BYTES = 16;
 const APPOINTMENT_CODE_COUNTER_NAME = 'appointments';
 const APPOINTMENT_CODE_PAD_LENGTH = 5;
 const APPOINTMENT_CODE_RETRY_LIMIT = 5;
-const EMPLOYEE_CLAIM_OTP_TTL_MINUTES = Math.min(
-  Math.max(Number(process.env.EMPLOYEE_CLAIM_OTP_TTL_MINUTES || 10), 5),
+const EMPLOYEE_CLAIM_LINK_TTL_MINUTES = Math.min(
+  Math.max(Number(process.env.EMPLOYEE_CLAIM_LINK_TTL_MINUTES || 10), 5),
   10,
 );
+const localEmployeeClaimSetupBaseUrl = configuredAllowedOrigins.find((origin) => /localhost|127\.0\.0\.1/i.test(origin)) || 'http://localhost:3000';
+const defaultEmployeeClaimSetupBaseUrl = isProduction
+  ? configuredAllowedOrigins[0] || [...defaultAllowedOrigins][0] || ''
+  : localEmployeeClaimSetupBaseUrl;
+const EMPLOYEE_CLAIM_SETUP_BASE_URL = String(
+  process.env.EMPLOYEE_CLAIM_SETUP_BASE_URL || process.env.PUBLIC_APP_URL || defaultEmployeeClaimSetupBaseUrl,
+).trim().replace(/\/+$/, '');
 const EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL = String(process.env.EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL || '').trim();
 const EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN = String(process.env.EMPLOYEE_CLAIM_EMAIL_WEBHOOK_TOKEN || '').trim();
 
@@ -159,15 +166,23 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
 }
 
-function hashVerificationCode(email, code) {
+function generateEmployeeClaimToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+function hashEmployeeClaimToken(token) {
   return crypto
     .createHash('sha256')
-    .update(`${normalizeEmail(email)}:${normalizeCredential(code)}`)
+    .update(normalizeCredential(token))
     .digest('hex');
 }
 
-function generateVerificationCode() {
-  return String(crypto.randomInt(100000, 1000000));
+function buildEmployeePasswordSetupLink(token) {
+  if (!EMPLOYEE_CLAIM_SETUP_BASE_URL) {
+    throw new Error('Employee claim setup base URL is not configured.');
+  }
+
+  return `${EMPLOYEE_CLAIM_SETUP_BASE_URL}/employee-setup-password?token=${encodeURIComponent(token)}`;
 }
 
 function validateEmployeePassword(password) {
@@ -511,8 +526,7 @@ const DEFAULT_TIME_SLOTS = [
 const DEFAULT_TIME_SLOT_MAP = new Map(DEFAULT_TIME_SLOTS.map((slot) => [slot.timeSlot, slot]));
 let cachedAppointmentStatuses = null;
 const DISPLAY_APPOINTMENT_STATUSES = ['Approved', 'Confirmed', 'Completed', 'Cancelled'];
-const ABSENCE_VOID_STATUS_LABEL = 'Voided due to Absence';
-const ABSENCE_VOID_NOTIFICATION_MESSAGE = 'Your appointment has been voided due to absence. You did not check in within your scheduled appointment time.';
+const ABSENCE_VOID_NOTIFICATION_MESSAGE = 'Your appointment was voided due to absence.';
 const ABSENCE_VOID_CANCELLATION_REASON = 'Voided due to absence because the user did not check in within the scheduled appointment time.';
 
 function parseAuthToken(token) {
@@ -760,64 +774,15 @@ function mapAppointmentStatusFromDatabase(status, cancelledAt = null) {
   return normalized || 'Approved';
 }
 
-function isAbsenceVoidReason(reason) {
-  const normalizedReason = normalizeIdentifier(reason).toLowerCase();
-  return normalizedReason.includes('absence')
-    || normalizedReason.includes('absent')
-    || normalizedReason.includes('did not check in')
-    || normalizedReason.includes('missed');
-}
-
 function getAppointmentStatusDisplayLabel(status, cancellationReason = '') {
   const normalizedStatus = mapAppointmentStatusFromDatabase(status);
-  if (normalizedStatus === 'Cancelled' && isAbsenceVoidReason(cancellationReason)) {
-    return ABSENCE_VOID_STATUS_LABEL;
-  }
   if (normalizedStatus === 'Confirmed') return 'In Line';
   if (normalizedStatus === 'Cancelled') return 'Voided';
   return normalizedStatus;
 }
 
-function formatAppointmentDateForNotification(dateValue) {
-  const rawDate = normalizeIdentifier(dateValue);
-  if (!rawDate) return 'the scheduled date';
-
-  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
-    ? new Date(`${rawDate}T00:00:00+08:00`)
-    : new Date(rawDate);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return rawDate;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'Asia/Manila',
-  }).format(parsedDate);
-}
-
-function formatTimeSlotForNotification(timeSlot) {
-  const normalizedTimeSlot = formatTimeSlotLabel(timeSlot);
-  return normalizedTimeSlot.replace(/\s+-\s+/, ' to ');
-}
-
-function buildAbsenceVoidNotificationMessage(appointment) {
-  const dateLabel = formatAppointmentDateForNotification(appointment?.appointment_date);
-  const timeLabel = formatTimeSlotForNotification(appointment?.time_slot);
-  const serviceLabel = [
-    normalizeIdentifier(appointment?.service),
-    normalizeIdentifier(appointment?.subcategory),
-  ].filter(Boolean).join(' ');
-  const purpose = normalizeIdentifier(appointment?.purpose);
-
-  return [
-    ABSENCE_VOID_NOTIFICATION_MESSAGE,
-    `Appointment: ${dateLabel}${timeLabel ? ` from ${timeLabel}` : ''}${serviceLabel ? ` for ${serviceLabel}` : ''}.`,
-    purpose ? `Purpose: ${purpose}.` : '',
-    `Status: ${ABSENCE_VOID_STATUS_LABEL}.`,
-  ].filter(Boolean).join(' ');
+function buildAbsenceVoidNotificationMessage() {
+  return ABSENCE_VOID_NOTIFICATION_MESSAGE;
 }
 
 async function notifyAppointmentVoidedDueToAbsence(appointment) {
@@ -828,7 +793,7 @@ async function notifyAppointmentVoidedDueToAbsence(appointment) {
   return createNotification({
     userId: appointment.user_id,
     type: 'appointment_status',
-    title: 'Appointment voided due to absence',
+    title: 'Appointment voided',
     message: buildAbsenceVoidNotificationMessage(appointment),
     appointmentId: appointment.id,
   });
@@ -2854,29 +2819,31 @@ async function ensureEmployeeAccountForEmail(email, client = pool) {
   return { employee, userId: user.id };
 }
 
-async function sendEmployeeClaimVerificationEmail({ email, code, expiresInMinutes }) {
-  const subject = 'Infirmary Connect employee account verification';
+async function sendEmployeePasswordSetupEmail({ email, setupLink, expiresInMinutes }) {
+  const subject = 'Set up your Infirmary Connect employee account password';
   const text = [
-    'Use this verification code to claim your Infirmary Connect employee account:',
+    'Use this secure link to set up your Infirmary Connect employee account password:',
     '',
-    code,
+    setupLink,
     '',
-    `This code expires in ${expiresInMinutes} minutes.`,
+    `This link expires in ${expiresInMinutes} minutes.`,
     'If you did not request this, please ignore this email.',
   ].join('\n');
   const html = `
-    <p>Use this verification code to claim your Infirmary Connect employee account:</p>
-    <p style="font-size:24px;font-weight:700;letter-spacing:4px;">${code}</p>
-    <p>This code expires in ${expiresInMinutes} minutes.</p>
+    <p>Use this secure link to set up your Infirmary Connect employee account password:</p>
+    <p><a href="${setupLink}" style="display:inline-block;padding:12px 18px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:700;">Set Up Password</a></p>
+    <p>If the button does not work, copy and paste this link into your browser:</p>
+    <p>${setupLink}</p>
+    <p>This link expires in ${expiresInMinutes} minutes.</p>
     <p>If you did not request this, please ignore this email.</p>
   `;
 
   if (!EMPLOYEE_CLAIM_EMAIL_WEBHOOK_URL) {
-    console.log(`Employee claim OTP for ${email}: ${code}`);
+    console.log(`Employee password setup link for ${email}: ${setupLink}`);
     if (isProduction) {
       throw new Error('Employee claim email delivery is not configured.');
     }
-    return { delivered: false, devOtp: code };
+    return { delivered: false, devSetupLink: setupLink };
   }
 
   const headers = {
@@ -2894,7 +2861,7 @@ async function sendEmployeeClaimVerificationEmail({ email, code, expiresInMinute
       subject,
       text,
       html,
-      purpose: 'employee_account_claim',
+      purpose: 'employee_account_password_setup',
     }),
     signal: AbortSignal.timeout(10000),
   });
@@ -2907,10 +2874,9 @@ async function sendEmployeeClaimVerificationEmail({ email, code, expiresInMinute
   return { delivered: true };
 }
 
-async function findValidEmployeeClaimToken({ email, code }, client = pool) {
-  const normalizedEmail = normalizeEmail(email);
-  const normalizedCode = normalizeCredential(code);
-  if (!normalizedEmail || !normalizedCode) {
+async function findValidEmployeeClaimToken({ token }, client = pool) {
+  const normalizedToken = normalizeCredential(token);
+  if (!normalizedToken) {
     return null;
   }
 
@@ -2926,15 +2892,14 @@ async function findValidEmployeeClaimToken({ email, code }, client = pool) {
       FROM public.employee_claim_tokens t
       JOIN public.users_auth u ON u.id = t.user_id
       JOIN public.faculties f ON f.auth_user_id = u.id
-      WHERE LOWER(t.email) = LOWER($1)
-        AND LOWER(COALESCE(f.email, '')) = LOWER($1)
-        AND t.code_hash = $2
+      WHERE t.code_hash = $1
+        AND LOWER(COALESCE(f.email, '')) = LOWER(t.email)
         AND t.consumed_at IS NULL
         AND t.expires_at > NOW()
       ORDER BY t.created_at DESC
       LIMIT 1
     `,
-    [normalizedEmail, hashVerificationCode(normalizedEmail, normalizedCode)],
+    [hashEmployeeClaimToken(normalizedToken)],
   );
 
   return rows[0] || null;
@@ -2955,12 +2920,13 @@ app.post('/api/auth/employee-claim/request', async (req, res) => {
     if (!employee || !userId) {
       await client.query('ROLLBACK');
       return res.status(404).json({
-        message: 'No employee account was found for this email. Please contact the system administrator.',
+        message: 'This email is not registered in the employee records.',
       });
     }
 
-    const code = generateVerificationCode();
-    const codeHash = hashVerificationCode(email, code);
+    const setupToken = generateEmployeeClaimToken();
+    const setupLink = buildEmployeePasswordSetupLink(setupToken);
+    const tokenHash = hashEmployeeClaimToken(setupToken);
 
     await client.query(
       `
@@ -2977,21 +2943,21 @@ app.post('/api/auth/employee-claim/request', async (req, res) => {
         INSERT INTO public.employee_claim_tokens (user_id, email, code_hash, expires_at)
         VALUES ($1, $2, $3, NOW() + ($4 || ' minutes')::interval)
       `,
-      [userId, email, codeHash, EMPLOYEE_CLAIM_OTP_TTL_MINUTES],
+      [userId, email, tokenHash, EMPLOYEE_CLAIM_LINK_TTL_MINUTES],
     );
 
-    const delivery = await sendEmployeeClaimVerificationEmail({
+    const delivery = await sendEmployeePasswordSetupEmail({
       email,
-      code,
-      expiresInMinutes: EMPLOYEE_CLAIM_OTP_TTL_MINUTES,
+      setupLink,
+      expiresInMinutes: EMPLOYEE_CLAIM_LINK_TTL_MINUTES,
     });
 
     await client.query('COMMIT');
 
     return res.json({
-      message: `Verification code sent to ${email}.`,
-      expiresInMinutes: EMPLOYEE_CLAIM_OTP_TTL_MINUTES,
-      devOtp: delivery.devOtp || undefined,
+      message: `Password setup link sent to ${email}.`,
+      expiresInMinutes: EMPLOYEE_CLAIM_LINK_TTL_MINUTES,
+      devSetupLink: delivery.devSetupLink || undefined,
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -3004,37 +2970,13 @@ app.post('/api/auth/employee-claim/request', async (req, res) => {
   }
 });
 
-app.post('/api/auth/employee-claim/verify', async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  const code = normalizeCredential(req.body?.code);
-
-  if (!isValidEmail(email) || !code) {
-    return res.status(400).json({ message: 'Registered email and verification code are required.' });
-  }
-
-  try {
-    const token = await findValidEmployeeClaimToken({ email, code });
-    if (!token) {
-      return res.status(400).json({ message: 'Invalid or expired verification code.' });
-    }
-
-    return res.json({
-      ok: true,
-      message: 'Email verified. Please create your password.',
-    });
-  } catch (error) {
-    return res.status(500).json({ message: 'Failed to verify employee account.', error: error.message });
-  }
-});
-
 app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  const code = normalizeCredential(req.body?.code);
+  const setupToken = normalizeCredential(req.body?.token);
   const password = String(req.body?.password || '');
   const confirmPassword = String(req.body?.confirmPassword || '');
 
-  if (!isValidEmail(email) || !code || !password || !confirmPassword) {
-    return res.status(400).json({ message: 'Email, verification code, password, and confirmation are required.' });
+  if (!setupToken || !password || !confirmPassword) {
+    return res.status(400).json({ message: 'Password setup link, password, and confirmation are required.' });
   }
 
   if (password !== confirmPassword) {
@@ -3050,14 +2992,14 @@ app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    const token = await findValidEmployeeClaimToken({ email, code }, client);
-    if (!token) {
+    const claimToken = await findValidEmployeeClaimToken({ token: setupToken }, client);
+    if (!claimToken) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+      return res.status(400).json({ message: 'Invalid or expired password setup link.' });
     }
 
     const passwordHash = hashPassword(password);
-    const updated = await client.query(
+    await client.query(
       `
         UPDATE public.users_auth
         SET password_hash = $2,
@@ -3067,9 +3009,8 @@ app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
             password_changed_at = NOW(),
             updated_at = NOW()
         WHERE id = $1
-        RETURNING *
       `,
-      [token.user_id, passwordHash],
+      [claimToken.user_id, passwordHash],
     );
 
     await client.query(
@@ -3081,7 +3022,7 @@ app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
         WHERE auth_user_id = $1
           AND LOWER(COALESCE(email, '')) = LOWER($2)
       `,
-      [token.user_id, email],
+      [claimToken.user_id, claimToken.email],
     );
 
     await client.query(
@@ -3090,18 +3031,13 @@ app.post('/api/auth/employee-claim/setup-password', async (req, res) => {
         SET consumed_at = NOW()
         WHERE id = $1
       `,
-      [token.id],
+      [claimToken.id],
     );
 
     await client.query('COMMIT');
 
-    const user = (await fetchAuthUserById(updated.rows[0].id)) || updated.rows[0];
-    const sessionToken = createSessionToken(user, email);
-
     return res.json({
-      message: 'Employee account activated successfully.',
-      token: sessionToken,
-      user: buildUserPayload(user),
+      message: 'Your employee account has been successfully activated. You may now log in using your email and password.',
     });
   } catch (error) {
     await client.query('ROLLBACK');
