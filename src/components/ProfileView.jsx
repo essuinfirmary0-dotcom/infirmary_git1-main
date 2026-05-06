@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   User,
@@ -35,6 +35,85 @@ const emptyPasswordForm = {
   confirmPassword: '',
 };
 
+const MAX_PROFILE_IMAGE_BYTES = 15 * 1024 * 1024;
+const PROFILE_IMAGE_MAX_DIMENSION = 1200;
+const PROFILE_IMAGE_QUALITY = 0.86;
+const PROFILE_IMAGE_EXTENSION_PATTERN = /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i;
+
+const isLikelyImageFile = (file) =>
+  Boolean(file?.type?.startsWith('image/')) || PROFILE_IMAGE_EXTENSION_PATTERN.test(file?.name || '');
+
+const formatFileSize = (bytes) => {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('The selected file is not a valid image.'));
+    };
+    reader.onerror = () => reject(new Error('Failed to read the selected image.'));
+    reader.readAsDataURL(file);
+  });
+
+const resizeImageDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    let objectUrl = '';
+
+    image.onload = () => {
+      try {
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+
+        if (!width || !height) {
+          reject(new Error('The selected image could not be loaded.'));
+          return;
+        }
+
+        const scale = Math.min(1, PROFILE_IMAGE_MAX_DIMENSION / Math.max(width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Image preview is not supported in this browser.'));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const outputType = file.type === 'image/png' || file.type === 'image/webp' ? file.type : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(outputType, PROFILE_IMAGE_QUALITY);
+        resolve(dataUrl);
+      } catch (error) {
+        reject(error);
+      } finally {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }
+    };
+
+    image.onerror = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      reject(new Error('The selected image could not be loaded.'));
+    };
+
+    objectUrl = URL.createObjectURL(file);
+    image.src = objectUrl;
+  });
+
 export const ProfileView = ({ user, onUserUpdated }) => {
   const [showQrPreview, setShowQrPreview] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -49,6 +128,9 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   const [passwordForm, setPasswordForm] = useState(emptyPasswordForm);
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [profileImageLoading, setProfileImageLoading] = useState(false);
+  const [profileImageFileName, setProfileImageFileName] = useState('');
+  const profileImageInputRef = useRef(null);
 
   useEffect(() => {
     setProfileForm({
@@ -60,6 +142,7 @@ export const ProfileView = ({ user, onUserUpdated }) => {
       address: user?.address || '',
       pictureUrl: user?.pictureUrl || '',
     });
+    setProfileImageFileName('');
   }, [user]);
 
   const handleDownloadQr = () => {
@@ -78,6 +161,11 @@ export const ProfileView = ({ user, onUserUpdated }) => {
 
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
+    if (profileImageLoading) {
+      toast.error('Please wait for the selected photo preview to finish loading.');
+      return;
+    }
+
     try {
       setProfileLoading(true);
       const result = await profileService.updateProfile(profileForm);
@@ -114,20 +202,35 @@ export const ProfileView = ({ user, onUserUpdated }) => {
     setPasswordForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleProfileImageChange = (event) => {
+  const handleProfileImageChange = async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
+
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      updateProfileField('pictureUrl', typeof reader.result === 'string' ? reader.result : '');
-    };
-    reader.onerror = () => {
-      toast.error('Failed to read the selected image.');
-    };
-    reader.readAsDataURL(file);
+    if (!isLikelyImageFile(file)) {
+      toast.error('Please select an image file.');
+      return;
+    }
+
+    if (file.size > MAX_PROFILE_IMAGE_BYTES) {
+      toast.error(`Profile photo must be ${formatFileSize(MAX_PROFILE_IMAGE_BYTES)} or smaller.`);
+      return;
+    }
+
+    try {
+      setProfileImageLoading(true);
+      const imageDataUrl = await resizeImageDataUrl(file).catch(() => readFileAsDataUrl(file));
+      updateProfileField('pictureUrl', imageDataUrl);
+      setProfileImageFileName(file.name || 'Selected image');
+      toast.success('Profile photo preview is ready.');
+    } catch (error) {
+      toast.error(error?.message || 'Failed to read the selected image.');
+    } finally {
+      setProfileImageLoading(false);
+    }
   };
 
   const userTypeLabel = getUserTypeLabel(user?.userType);
@@ -182,7 +285,7 @@ export const ProfileView = ({ user, onUserUpdated }) => {
               </h3>
               <button
                 type="submit"
-                disabled={profileLoading}
+                disabled={profileLoading || profileImageLoading}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-hover disabled:opacity-60"
               >
                 <Save size={16} />
@@ -202,18 +305,25 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                 </div>
                 <div className="flex-1 space-y-2 text-center sm:text-left">
                   <p className="text-sm font-bold text-slate-700">Profile Photo</p>
-                  <p className="text-xs text-slate-500">Upload a square photo for the best result. It will be saved with your profile.</p>
+                  <p className="text-xs text-slate-500">
+                    {profileImageFileName
+                      ? `Previewing: ${profileImageFileName}`
+                      : 'Upload a square photo for the best result. It will be saved with your profile.'}
+                  </p>
                 </div>
-                <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                <div className="relative inline-flex min-h-[48px] min-w-[148px] items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">
                   <Camera size={16} className="text-primary" />
-                  Upload Image
+                  {profileImageLoading ? 'Loading...' : 'Upload Image'}
                   <input
+                    ref={profileImageInputRef}
                     type="file"
                     accept="image/*"
-                    className="hidden"
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
                     onChange={handleProfileImageChange}
+                    aria-label="Upload profile photo"
+                    disabled={profileImageLoading || profileLoading}
                   />
-                </label>
+                </div>
               </div>
               <label className="space-y-1.5">
                 <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">First Name</span>

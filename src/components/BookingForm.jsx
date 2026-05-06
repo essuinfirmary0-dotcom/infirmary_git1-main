@@ -49,11 +49,16 @@ const SUBCATEGORY_OPTIONS_BY_SERVICE = {
   Nutrition: ['Consultation'],
 };
 const EMPLOYEE_FIXED_SUBCATEGORY = 'Consultation';
+const MEDICAL_CONSULTATION_PURPOSE = 'Specific Pain/Concern';
 
 const commonPurposesByService = {
   Dental: ['Tooth Extraction'],
-  Medical: ['OJT', 'Sports', 'Educational Tours'],
   Nutrition: ['Dietary Counseling'],
+};
+
+const medicalPurposesBySubcategory = {
+  Certification: ['OJT', 'Sports', 'Educational Tours'],
+  Consultation: [MEDICAL_CONSULTATION_PURPOSE],
 };
 
 const guestPurposesByService = {
@@ -218,11 +223,42 @@ const getDefaultSubcategoryForService = (service) => {
 
 const buildSingleValueOptions = (...values) => [
   ...new Set(
-    values
+    values.flat()
       .map((value) => normalizeDepartmentName(value))
       .filter(Boolean),
   ),
 ];
+
+const hasTestingEmployeeMarker = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return false;
+
+  return normalized.includes('localhost')
+    || normalized.includes('testing')
+    || /(^|[\s._+@-])test(ing)?([\s._+@-]|$)/.test(normalized);
+};
+
+const isTestingEmployeeAccount = (user) => {
+  if (!isEmployeeBookingUserType(user?.userType || user?.role)) {
+    return false;
+  }
+
+  return [
+    user?.email,
+    user?.name,
+    user?.college,
+    user?.department,
+    user?.program,
+    user?.position,
+  ].some(hasTestingEmployeeMarker);
+};
+
+const getPurposeOptionsForSelection = ({ isGuestUser, service, subcategory }) => {
+  if (!service) return [];
+  if (isGuestUser) return guestPurposesByService[service] || [];
+  if (service === 'Medical') return medicalPurposesBySubcategory[subcategory] || [];
+  return commonPurposesByService[service] || [];
+};
 
 const supportsRequirementUploads = (service, subcategory) =>
   service === 'Medical' && subcategory === 'Certification';
@@ -644,6 +680,7 @@ export const BookingForm = ({
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
   const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
   const isEmployeeBookingUser = !isGuestUser && isEmployeeBookingUserType(user?.userType || user?.role);
+  const isTestingEmployeeBookingUser = isEmployeeBookingUser && isTestingEmployeeAccount(user);
   const todayDate = getCurrentSystemDate(currentDateTime);
   const todayDateKey = format(todayDate, 'yyyy-MM-dd');
 
@@ -797,9 +834,12 @@ export const BookingForm = ({
     }
   }, [availableStudentPrograms, formData.college, formData.program, isStudentBookingUser, studentAcademicOptions.colleges]);
 
-  const purposeOptions = isGuestUser ? guestPurposesByService : commonPurposesByService;
   const serviceOptions = isGuestUser ? guestServices : services;
-  const availablePurposes = formData.service ? (purposeOptions[formData.service] || []) : [];
+  const availablePurposes = getPurposeOptionsForSelection({
+    isGuestUser,
+    service: formData.service,
+    subcategory: formData.subcategory,
+  });
   const availableSubcategories = isEmployeeBookingUser && formData.service
     ? [EMPLOYEE_FIXED_SUBCATEGORY]
     : getAvailableSubcategoryOptions(formData.service);
@@ -807,6 +847,21 @@ export const BookingForm = ({
   const employeeCollegeOptions = buildSingleValueOptions(formData.college, user?.college);
   const employeeDepartmentOptions = buildSingleValueOptions(formData.department, user?.department, user?.program);
   const employeePositionOptions = buildSingleValueOptions(formData.position, user?.position);
+  const employeeTestingCollegeOptions = buildSingleValueOptions(
+    employeeCollegeOptions,
+    studentAcademicOptions.colleges,
+  );
+  const employeeTestingDepartmentOptions = buildSingleValueOptions(
+    employeeDepartmentOptions,
+    Object.values(studentAcademicOptions.programsByCollege).flat(),
+  );
+  const employeeTestingPositionOptions = buildSingleValueOptions(
+    employeePositionOptions,
+    'Localhost Testing Only',
+    'Testing Position',
+    'Faculty',
+    'Staff',
+  );
   const requirementFiles = [...requirementFileGroups.chestXray, ...requirementFileGroups.urinalysis];
   const requirementUploadItems = [
     ...requirementFileGroups.chestXray.map((file) => ({ file, label: 'Chest Xray' })),
@@ -866,7 +921,14 @@ export const BookingForm = ({
       return;
     }
 
-    if (availablePurposes.length && !availablePurposes.includes(formData.purpose)) {
+    if (!availablePurposes.length) {
+      if (formData.purpose) {
+        setFormData((prev) => ({ ...prev, purpose: '' }));
+      }
+      return;
+    }
+
+    if (!availablePurposes.includes(formData.purpose)) {
       setFormData((prev) => ({ ...prev, purpose: availablePurposes[0] }));
     }
   }, [formData.service, formData.purpose, availablePurposes]);
@@ -1343,17 +1405,34 @@ export const BookingForm = ({
                     <GraduationCap size={16} className="text-primary" />
                     Department
                   </label>
-                  <select
-                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                    value={formData.department}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
-                    disabled={employeeDepartmentOptions.length <= 1}
-                  >
-                    <option value="" disabled>No department on file</option>
-                    {employeeDepartmentOptions.map((department) => (
-                      <option key={department} value={department}>{department}</option>
-                    ))}
-                  </select>
+                  {isTestingEmployeeBookingUser ? (
+                    <>
+                      <input
+                        list="testing-employee-departments"
+                        className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
+                        value={formData.department}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
+                        placeholder="Enter department"
+                      />
+                      <datalist id="testing-employee-departments">
+                        {employeeTestingDepartmentOptions.map((department) => (
+                          <option key={department} value={department} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <select
+                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                      value={formData.department}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
+                      disabled={employeeDepartmentOptions.length <= 1}
+                    >
+                      <option value="" disabled>No department on file</option>
+                      {employeeDepartmentOptions.map((department) => (
+                        <option key={department} value={department}>{department}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -1361,17 +1440,34 @@ export const BookingForm = ({
                     <Building2 size={16} className="text-primary" />
                     College
                   </label>
-                  <select
-                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                    value={formData.college}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
-                    disabled={employeeCollegeOptions.length <= 1}
-                  >
-                    <option value="" disabled>No college on file</option>
-                    {employeeCollegeOptions.map((college) => (
-                      <option key={college} value={college}>{college}</option>
-                    ))}
-                  </select>
+                  {isTestingEmployeeBookingUser ? (
+                    <>
+                      <input
+                        list="testing-employee-colleges"
+                        className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
+                        value={formData.college}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
+                        placeholder="Enter college"
+                      />
+                      <datalist id="testing-employee-colleges">
+                        {employeeTestingCollegeOptions.map((college) => (
+                          <option key={college} value={college} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <select
+                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                      value={formData.college}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
+                      disabled={employeeCollegeOptions.length <= 1}
+                    >
+                      <option value="" disabled>No college on file</option>
+                      {employeeCollegeOptions.map((college) => (
+                        <option key={college} value={college}>{college}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -1379,17 +1475,34 @@ export const BookingForm = ({
                     <User size={16} className="text-primary" />
                     Position
                   </label>
-                  <select
-                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                    value={formData.position}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, position: e.target.value }))}
-                    disabled={employeePositionOptions.length <= 1}
-                  >
-                    <option value="" disabled>No position on file</option>
-                    {employeePositionOptions.map((position) => (
-                      <option key={position} value={position}>{position}</option>
-                    ))}
-                  </select>
+                  {isTestingEmployeeBookingUser ? (
+                    <>
+                      <input
+                        list="testing-employee-positions"
+                        className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
+                        value={formData.position}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, position: e.target.value }))}
+                        placeholder="Enter position"
+                      />
+                      <datalist id="testing-employee-positions">
+                        {employeeTestingPositionOptions.map((position) => (
+                          <option key={position} value={position} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <select
+                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                      value={formData.position}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, position: e.target.value }))}
+                      disabled={employeePositionOptions.length <= 1}
+                    >
+                      <option value="" disabled>No position on file</option>
+                      {employeePositionOptions.map((position) => (
+                        <option key={position} value={position}>{position}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </>
             )}
@@ -1472,10 +1585,14 @@ export const BookingForm = ({
                 className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
                 value={formData.purpose}
                 onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
-                disabled={!formData.service}
+                disabled={!formData.service || !formData.subcategory}
               >
                 <option value="" disabled>
-                  {formData.service ? 'Select purpose' : 'Select a service first'}
+                  {!formData.service
+                    ? 'Select a service first'
+                    : !formData.subcategory
+                    ? 'Select sub-category first'
+                    : 'Select purpose'}
                 </option>
                 {availablePurposes.map((p) => (
                   <option key={p} value={p}>{p}</option>
