@@ -1080,8 +1080,6 @@ export const BookingForm = ({
               tileDisabled={isDayDisabled}
               tileClassName={getCalendarTileClassName}
               className="rounded-xl sm:rounded-2xl border-none w-full max-w-full"
-              minDate={todayDate}
-              maxDate={addMonths(todayDate, 1)}
             />
             <div className="mt-4 sm:mt-8 p-4 sm:p-6 bg-slate-50 rounded-xl sm:rounded-2xl border border-slate-100">
               <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
