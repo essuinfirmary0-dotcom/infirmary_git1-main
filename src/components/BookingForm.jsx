@@ -6,7 +6,7 @@ import { appointmentService } from '../services/appointmentService';
 import { profileService } from '../services/profileService';
 import 'react-calendar/dist/Calendar.css';
 import { format, isBefore, startOfDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
-import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, X, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
+import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { APPOINTMENT_BOOKING_BLOCKED_DAY_MESSAGE, isInfirmaryClosedOnDate } from '../utils/appointmentCalendar';
 
@@ -341,66 +341,59 @@ const ConfirmationModal = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+        <div className="fixed inset-0 z-100 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-2xl sm:rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden relative my-4"
+            className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-md w-full overflow-hidden relative my-3"
           >
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
-            >
-              <X size={24} />
-            </button>
-
-            <div className="bg-primary p-5 sm:p-8 text-white text-center">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 backdrop-blur-md">
-                <CheckCircle2 className="w-8 h-8 sm:w-10 sm:h-10" />
+            <div className="bg-primary p-4 sm:p-5 text-white text-center">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-2 backdrop-blur-md">
+                <CheckCircle2 className="w-7 h-7 sm:w-8 sm:h-8" />
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold">
+              <h2 className="text-xl sm:text-2xl font-bold">
                 {isRescheduleMode ? 'Reschedule Confirmed!' : 'Booking Confirmed!'}
               </h2>
-              <p className="text-white/80 mt-2 text-sm sm:text-base">
+              <p className="text-white/80 mt-1 text-xs sm:text-sm">
                 {isRescheduleMode
                   ? 'Your appointment has been successfully moved to the new schedule.'
                   : 'Your appointment has been successfully scheduled.'}
               </p>
             </div>
 
-            <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
-              <div className="flex items-center justify-between p-4 sm:p-6 bg-slate-50 rounded-2xl sm:rounded-3xl border border-dashed border-slate-200">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-primary/10 text-primary rounded-2xl">
-                    <Ticket size={24} />
+            <div className="p-4 sm:p-5 space-y-3 sm:space-y-4">
+              <div className="flex items-center justify-between p-3 sm:p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-primary/10 text-primary rounded-2xl">
+                    <Ticket size={20} />
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Ticket Number</p>
-                    <p className="text-2xl font-black text-slate-800 tracking-tight">{appointment.appointmentCode}</p>
+                    <p className="text-xl font-black text-slate-800 tracking-tight">{appointment.appointmentCode}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:gap-6">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-slate-400 uppercase">Patient</p>
-                  <p className="font-bold text-slate-800">{appointment.patientName}</p>
+                  <p className="text-sm font-bold text-slate-800">{appointment.patientName}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-slate-400 uppercase">Service</p>
-                  <p className="font-bold text-slate-800">{appointment.service} - {appointment.subcategory}</p>
+                  <p className="text-sm font-bold text-slate-800">{appointment.service} - {appointment.subcategory}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-slate-400 uppercase">Date</p>
-                  <p className="font-bold text-slate-800 flex items-center gap-2">
+                  <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
                     <CalendarDays size={14} className="text-primary" />
                     {safeFormat(appointment.date, 'MMM d, yyyy')}
                   </p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-slate-400 uppercase">Time</p>
-                  <p className="font-bold text-slate-800 flex items-center gap-2">
+                  <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
                     <Clock size={14} className="text-primary" />
                     {appointment.time}
                   </p>
@@ -408,25 +401,25 @@ const ConfirmationModal = ({
               </div>
 
               {isGuestUser && (
-                <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4 sm:p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="rounded-2xl border border-primary/10 bg-primary/5 p-3 sm:p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-2">
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Guest Check-In Pass</p>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Temporary ID</p>
-                        <p className="text-xl font-black text-slate-900">{tempIdentifier || 'Not available'}</p>
+                        <p className="text-lg font-black text-slate-900">{tempIdentifier || 'Not available'}</p>
                       </div>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Type of Guest</p>
-                        <p className="font-bold text-slate-800">{guestType || user?.program || 'Not provided'}</p>
+                        <p className="text-sm font-bold text-slate-800">{guestType || user?.program || 'Not provided'}</p>
                       </div>
                       <p className="text-xs text-slate-500">
                         Use this temporary ID or QR code at the kiosk when you check in for your appointment.
                       </p>
                     </div>
                     {guestQrCode && (
-                      <div className="self-center rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                        <img src={guestQrCode} alt="Guest temporary QR code" className="h-32 w-32 rounded-xl object-contain" />
+                      <div className="self-center rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                        <img src={guestQrCode} alt="Guest temporary QR code" className="h-24 w-24 rounded-xl object-contain" />
                       </div>
                     )}
                   </div>
@@ -434,7 +427,7 @@ const ConfirmationModal = ({
                     type="button"
                     onClick={handleDownloadGuestPass}
                     disabled={!tempIdentifier || !guestQrCode}
-                    className="mt-4 w-full rounded-2xl border border-primary/20 bg-white px-4 py-3 text-sm font-black text-primary transition-colors hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-3 w-full rounded-2xl border border-primary/20 bg-white px-4 py-2.5 text-sm font-black text-primary transition-colors hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Download Guest QR and Temp ID
                   </button>
@@ -442,11 +435,11 @@ const ConfirmationModal = ({
               )}
 
               {(showCollege || showProgram) && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   {showCollege && (
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-slate-400 uppercase">College</p>
-                      <p className="font-bold text-slate-800 flex items-start gap-2">
+                      <p className="text-sm font-bold text-slate-800 flex items-start gap-2">
                         <Building2 size={14} className="text-primary shrink-0 mt-0.5" />
                         <span className="min-w-0">{displayCollege}</span>
                       </p>
@@ -455,7 +448,7 @@ const ConfirmationModal = ({
                   {showProgram && (
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-slate-400 uppercase">Department / Program</p>
-                      <p className="font-bold text-slate-800 flex items-start gap-2">
+                      <p className="text-sm font-bold text-slate-800 flex items-start gap-2">
                         <GraduationCap size={14} className="text-primary shrink-0 mt-0.5" />
                         <span className="min-w-0">{displayProgram}</span>
                       </p>
@@ -464,7 +457,7 @@ const ConfirmationModal = ({
                 </div>
               )}
 
-              <div className="pt-4 border-t border-slate-100">
+              <div className="pt-3 border-t border-slate-100">
                 <div className="flex items-start gap-3 text-sm text-slate-500">
                   <MapPin size={16} className="text-slate-400 mt-0.5" />
                   <p>ESSU MAIN INFIRMARY BUILDING</p>
@@ -473,7 +466,7 @@ const ConfirmationModal = ({
 
               <button
                 onClick={onClose}
-                className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-hover transition-all shadow-lg shadow-primary/20"
+                className="w-full py-3 bg-primary text-white font-bold rounded-2xl hover:bg-primary-hover transition-all shadow-lg shadow-primary/20"
               >
                 Done
               </button>
