@@ -12,6 +12,10 @@ import {
   Save,
   KeyRound,
   Camera,
+  Pencil,
+  IdCard,
+  Building2,
+  GraduationCap,
 } from 'lucide-react';
 import { profileService } from '../services/profileService';
 import { getProfileImageSrc, handleProfileImageError } from '../utils/profileImage';
@@ -34,6 +38,28 @@ const emptyPasswordForm = {
   newPassword: '',
   confirmPassword: '',
 };
+
+const buildProfileForm = (user = {}) => ({
+  firstName: user?.firstName || '',
+  middleName: user?.middleName || '',
+  lastName: user?.lastName || '',
+  email: user?.email || '',
+  phone: user?.phone || '',
+  address: user?.address || '',
+  pictureUrl: user?.pictureUrl || '',
+});
+
+const ProfileInfoItem = ({ icon: Icon, label, value, fullWidth = false }) => (
+  <div className={`flex items-start gap-4 rounded-2xl bg-slate-50 p-4 ${fullWidth ? 'md:col-span-2' : ''}`}>
+    <div className="rounded-lg bg-white p-2 text-primary shadow-sm">
+      <Icon size={18} />
+    </div>
+    <div className="min-w-0">
+      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className="break-words text-sm font-semibold text-slate-800">{value || 'Not set'}</p>
+    </div>
+  </div>
+);
 
 const MAX_PROFILE_IMAGE_BYTES = 15 * 1024 * 1024;
 const PROFILE_IMAGE_MAX_DIMENSION = 1200;
@@ -116,15 +142,9 @@ const resizeImageDataUrl = (file) =>
 
 export const ProfileView = ({ user, onUserUpdated }) => {
   const [showQrPreview, setShowQrPreview] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    firstName: '',
-    middleName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    address: '',
-    pictureUrl: '',
-  });
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState(() => buildProfileForm(user));
   const [passwordForm, setPasswordForm] = useState(emptyPasswordForm);
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -133,16 +153,9 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   const profileImageInputRef = useRef(null);
 
   useEffect(() => {
-    setProfileForm({
-      firstName: user?.firstName || '',
-      middleName: user?.middleName || '',
-      lastName: user?.lastName || '',
-      email: user?.email || '',
-      phone: user?.phone || '',
-      address: user?.address || '',
-      pictureUrl: user?.pictureUrl || '',
-    });
+    setProfileForm(buildProfileForm(user));
     setProfileImageFileName('');
+    setIsEditingProfile(false);
   }, [user]);
 
   const handleDownloadQr = () => {
@@ -161,6 +174,9 @@ export const ProfileView = ({ user, onUserUpdated }) => {
 
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
+    if (!isEditingProfile) {
+      return;
+    }
     if (profileImageLoading) {
       toast.error('Please wait for the selected photo preview to finish loading.');
       return;
@@ -170,6 +186,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
       setProfileLoading(true);
       const result = await profileService.updateProfile(profileForm);
       onUserUpdated?.(result.user);
+      setIsEditingProfile(false);
+      setProfileImageFileName('');
       toast.success(result.message || 'Profile updated successfully.');
     } catch (err) {
       const message = err.response?.data?.message || 'Failed to update profile.';
@@ -185,6 +203,7 @@ export const ProfileView = ({ user, onUserUpdated }) => {
       setPasswordLoading(true);
       const result = await profileService.updatePassword(passwordForm);
       setPasswordForm(emptyPasswordForm);
+      setIsPasswordFormOpen(false);
       toast.success(result.message || 'Password updated successfully.');
     } catch (err) {
       const message = err.response?.data?.message || 'Failed to update password.';
@@ -195,6 +214,9 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   };
 
   const updateProfileField = (field, value) => {
+    if (!isEditingProfile) {
+      return;
+    }
     setProfileForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -205,6 +227,10 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   const handleProfileImageChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
+
+    if (!isEditingProfile) {
+      return;
+    }
 
     if (!file) {
       return;
@@ -233,9 +259,47 @@ export const ProfileView = ({ user, onUserUpdated }) => {
     }
   };
 
+  const handleStartProfileEdit = () => {
+    setProfileForm(buildProfileForm(user));
+    setProfileImageFileName('');
+    setIsEditingProfile(true);
+  };
+
+  const handleCancelProfileEdit = () => {
+    setProfileForm(buildProfileForm(user));
+    setProfileImageFileName('');
+    setIsEditingProfile(false);
+  };
+
+  const handleStartPasswordChange = () => {
+    setPasswordForm(emptyPasswordForm);
+    setIsPasswordFormOpen(true);
+  };
+
+  const handleCancelPasswordChange = () => {
+    setPasswordForm(emptyPasswordForm);
+    setIsPasswordFormOpen(false);
+  };
+
   const userTypeLabel = getUserTypeLabel(user?.userType);
   const identityInfo = getRoleIdentityInfo(user);
   const isGuestUser = identityInfo.isGuestUser;
+  const profileFieldDisabled = !isEditingProfile || profileLoading || profileImageLoading;
+  const personalCollege = identityInfo.isEmployeeUser ? (user?.college || '') : identityInfo.college;
+  const personalProgram = identityInfo.isEmployeeUser
+    ? identityInfo.department
+    : isGuestUser
+      ? (user?.program || '')
+      : identityInfo.program;
+  const personalProgramLabel = isGuestUser ? 'Type of Guest' : 'Program / Department';
+  const personalIdentifierLabel = identityInfo.isEmployeeUser
+    ? 'Employee Email'
+    : identityInfo.isStudentUser
+      ? 'Student ID'
+      : 'ID Number';
+  const personalIdentifierValue = identityInfo.isEmployeeUser
+    ? (user?.email || '')
+    : identityInfo.identifierValue;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 min-w-0">
@@ -281,16 +345,38 @@ export const ProfileView = ({ user, onUserUpdated }) => {
           >
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
-                <User size={20} className="text-primary shrink-0" /> Update Profile
+                <User size={20} className="text-primary shrink-0" /> Profile Information
               </h3>
-              <button
-                type="submit"
-                disabled={profileLoading || profileImageLoading}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-hover disabled:opacity-60"
-              >
-                <Save size={16} />
-                {profileLoading ? 'Saving...' : 'Save Changes'}
-              </button>
+              {isEditingProfile ? (
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelProfileEdit}
+                    disabled={profileLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    <X size={16} />
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={profileLoading || profileImageLoading}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover disabled:opacity-60"
+                  >
+                    <Save size={16} />
+                    {profileLoading ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartProfileEdit}
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover"
+                >
+                  <Pencil size={16} />
+                  Edit Profile
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -306,24 +392,28 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                 <div className="flex-1 space-y-2 text-center sm:text-left">
                   <p className="text-sm font-bold text-slate-700">Profile Photo</p>
                   <p className="text-xs text-slate-500">
-                    {profileImageFileName
+                    {!isEditingProfile
+                      ? 'Click Edit Profile to update your profile photo.'
+                      : profileImageFileName
                       ? `Previewing: ${profileImageFileName}`
                       : 'Upload a square photo for the best result. It will be saved with your profile.'}
                   </p>
                 </div>
-                <div className="relative inline-flex min-h-[48px] min-w-[148px] items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">
-                  <Camera size={16} className="text-primary" />
-                  {profileImageLoading ? 'Loading...' : 'Upload Image'}
-                  <input
-                    ref={profileImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                    onChange={handleProfileImageChange}
-                    aria-label="Upload profile photo"
-                    disabled={profileImageLoading || profileLoading}
-                  />
-                </div>
+                {isEditingProfile && (
+                  <div className="relative inline-flex min-h-[48px] min-w-[148px] items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">
+                    <Camera size={16} className="text-primary" />
+                    {profileImageLoading ? 'Loading...' : 'Upload Image'}
+                    <input
+                      ref={profileImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                      onChange={handleProfileImageChange}
+                      aria-label="Upload profile photo"
+                      disabled={profileImageLoading || profileLoading}
+                    />
+                  </div>
+                )}
               </div>
               <label className="space-y-1.5">
                 <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">First Name</span>
@@ -331,7 +421,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   type="text"
                   value={profileForm.firstName}
                   onChange={(e) => updateProfileField('firstName', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
               <label className="space-y-1.5">
@@ -340,7 +431,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   type="text"
                   value={profileForm.middleName}
                   onChange={(e) => updateProfileField('middleName', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
               <label className="space-y-1.5 md:col-span-2">
@@ -349,7 +441,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   type="text"
                   value={profileForm.lastName}
                   onChange={(e) => updateProfileField('lastName', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
               <label className="space-y-1.5">
@@ -358,7 +451,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   type="email"
                   value={profileForm.email}
                   onChange={(e) => updateProfileField('email', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
               <label className="space-y-1.5">
@@ -367,7 +461,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   type="text"
                   value={profileForm.phone}
                   onChange={(e) => updateProfileField('phone', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
               <label className="space-y-1.5 md:col-span-2">
@@ -376,7 +471,8 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   rows={3}
                   value={profileForm.address}
                   onChange={(e) => updateProfileField('address', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary resize-none"
+                  disabled={profileFieldDisabled}
+                  className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
             </div>
@@ -395,85 +491,90 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   By default, your first password is your student ID. You can change it here anytime.
                 </p>
               </div>
+              {!isPasswordFormOpen && (
+                <button
+                  type="button"
+                  onClick={handleStartPasswordChange}
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover"
+                >
+                  <KeyRound size={16} />
+                  Change Password
+                </button>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <label className="space-y-1.5">
-                <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Current Password</span>
-                <input
-                  type="password"
-                  required
-                  value={passwordForm.currentPassword}
-                  onChange={(e) => updatePasswordField('currentPassword', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">New Password</span>
-                <input
-                  type="password"
-                  required
-                  value={passwordForm.newPassword}
-                  onChange={(e) => updatePasswordField('newPassword', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Confirm Password</span>
-                <input
-                  type="password"
-                  required
-                  value={passwordForm.confirmPassword}
-                  onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary"
-                />
-              </label>
-            </div>
+            {isPasswordFormOpen && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Current Password</span>
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.currentPassword}
+                      onChange={(e) => updatePasswordField('currentPassword', e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">New Password</span>
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.newPassword}
+                      onChange={(e) => updatePasswordField('newPassword', e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Confirm Password</span>
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.confirmPassword}
+                      onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                    />
+                  </label>
+                </div>
 
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={passwordLoading}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-hover disabled:opacity-60"
-              >
-                <KeyRound size={16} />
-                {passwordLoading ? 'Updating...' : 'Update Password'}
-              </button>
-            </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelPasswordChange}
+                    disabled={passwordLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    <X size={16} />
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={passwordLoading}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-primary-hover disabled:opacity-60"
+                  >
+                    <KeyRound size={16} />
+                    {passwordLoading ? 'Updating...' : 'Update Password'}
+                  </button>
+                </div>
+              </>
+            )}
           </form>
 
           <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm border border-slate-200 space-y-4 sm:space-y-6 min-w-0 overflow-hidden">
             <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
-              <User size={20} className="text-primary shrink-0" /> Current Information
+              <User size={20} className="text-primary shrink-0" /> Personal Information
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl">
-                <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
-                  <Mail size={18} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Email Address</p>
-                  <p className="text-sm font-semibold text-slate-800 break-all">{user?.email || 'Not set'}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl">
-                <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
-                  <Phone size={18} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Phone Number</p>
-                  <p className="text-sm font-semibold text-slate-800">{user?.phone || 'Not set'}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl md:col-span-2">
-                <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
-                  <MapPin size={18} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Address</p>
-                  <p className="text-sm font-semibold text-slate-800">{user?.address || 'Not set'}</p>
-                </div>
-              </div>
+              <ProfileInfoItem icon={ShieldCheck} label="User Type" value={userTypeLabel} />
+              <ProfileInfoItem icon={IdCard} label={personalIdentifierLabel} value={personalIdentifierValue} />
+              {!isGuestUser && (
+                <ProfileInfoItem icon={Building2} label="College" value={personalCollege} />
+              )}
+              <ProfileInfoItem icon={GraduationCap} label={personalProgramLabel} value={personalProgram} />
+              <ProfileInfoItem icon={Mail} label="Email Address" value={user?.email || ''} />
+              <ProfileInfoItem icon={Phone} label="Phone Number" value={user?.phone || ''} />
+              <ProfileInfoItem icon={MapPin} label="Address" value={user?.address || ''} fullWidth />
             </div>
           </div>
         </div>

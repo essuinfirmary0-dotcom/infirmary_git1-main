@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import ReactCalendar from 'react-calendar';
 import { appointmentService } from '../services/appointmentService';
 import { profileService } from '../services/profileService';
-import { departmentService } from '../services/departmentService';
 import 'react-calendar/dist/Calendar.css';
 import { format, isBefore, startOfDay, addMonths, isAfter, isValid, parseISO, isSameDay } from 'date-fns';
 import { Clock, User, FileText, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ClipboardList, Tag, X, Ticket, MapPin, CalendarDays, Building2, GraduationCap } from 'lucide-react';
@@ -65,70 +64,6 @@ const guestPurposesByService = {
   Medical: ['School Requirement'],
 };
 
-const STUDENT_PROGRAM_GROUPS = {
-  'College of Education': [
-    'Bachelor of Secondary Education - Mathematics',
-    'Bachelor of Secondary Education - Social Studies',
-    'Bachelor of Secondary Education - Science',
-    'Bachelor of Secondary Education - English',
-    'Bachelor of Secondary Education - Filipino',
-    'Bachelor of Elementary Education',
-  ],
-  'College of Agriculture and Fisheries': [
-    'BS in Agriculture',
-    'BS in Agriculture - Animal Science',
-    'BS in Agriculture - Crop Science',
-    'BS in Fisheries',
-  ],
-  'College of Business and Accountancy': [
-    'BS in Accountancy',
-    'BS in Accounting Information System',
-    'BS in Business Administration',
-    'BS in Business Administration - Business Economics',
-    'BS in Business Administration - Human Resource Management',
-    'BS in Business Administration - Financial Management',
-    'BS in Business Administration - Marketing Management',
-    'BS in Entrepreneurship',
-  ],
-  'College of Engineering': [
-    'BS in Civil Enginerring',
-    'BS in Computer Engineering',
-    'BS in Electrical Engineering',
-  ],
-  'College of Nursing and Allied Health Sciences': [
-    'BS in Nursing',
-    'Diploma in Midwifery',
-    'BS in Nutrition and Dietetics',
-  ],
-  'College of Information and Computing Studies': [
-    'BS in Information Technology',
-    'BS in Computer Science',
-    'Associate in Computer Technology',
-    'BS in Entertainment & Multimedia Computing - Digital Animation Technology',
-  ],
-  'College of Arts and Social Sciences': [
-    'BA in Political Science',
-    'BA in Communication',
-    'BS in Social Work',
-  ],
-  'College of Industrial Technology': [
-    'BS in Industrial Technology - Drafting Technology',
-    'BS in Industrial Technology - Automotive Technology',
-    'BS in Industrial Technology - Electrical Technology',
-    'BS in Industrial Technology - Electronics Technology',
-  ],
-  'College of Hospitality and Tourism Management': [
-    'BS in Hospitality Management',
-    'BS in Tourism Management',
-  ],
-  'College of Science and Environment': [
-    'BS in Biology',
-    'BS in Environmental Science',
-  ],
-  'College of Criminology': [
-    'BS in Criminology',
-  ],
-};
 const STUDENT_BOOKING_USER_TYPES = new Set(['student', 'new', 'old']);
 const NON_EMPLOYEE_BOOKING_USER_TYPES = new Set(['guest', 'admin', 'super_admin']);
 
@@ -148,30 +83,6 @@ const normalizeDepartmentName = (name) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const buildStudentAcademicOptions = (departments = []) => {
-  const importedProgramLookup = new Map(
-    (Array.isArray(departments) ? departments : [])
-      .map((department) => normalizeDepartmentName(department?.name))
-      .filter(Boolean)
-      .map((name) => [name, name]),
-  );
-
-  const programsByCollege = Object.fromEntries(
-    Object.entries(STUDENT_PROGRAM_GROUPS).map(([college, programs]) => {
-      const resolvedPrograms = programs
-        .map((program) => importedProgramLookup.get(normalizeDepartmentName(program)) || program)
-        .map((program) => normalizeDepartmentName(program));
-
-      return [college, [...new Set(resolvedPrograms)].sort((left, right) => left.localeCompare(right))];
-    }),
-  );
-
-  return {
-    colleges: Object.keys(programsByCollege),
-    programsByCollege,
-  };
-};
-
 const DEFAULT_TIME_SLOT_OPTIONS = [
   { time: '8:00 AM - 9:00 AM', maxCapacity: 13, session: 'morning' },
   { time: '9:00 AM - 10:00 AM', maxCapacity: 13, session: 'morning' },
@@ -187,6 +98,7 @@ const TIME_SLOT_SECTIONS = [
   { key: 'afternoon', label: 'Afternoon Session', totalCapacity: 50 },
 ];
 const MEDICAL_REQUIREMENT_NOTICE = 'All submitted files are for initial review only. Please bring the original documents to the infirmary office, otherwise your request will not be processed and no medical certification will be issued.';
+const SAME_DAY_APPOINTMENT_MESSAGE = 'You already have an appointment scheduled for this day. Multiple bookings on the same day are not allowed.';
 
 const createDefaultSlotAvailability = () =>
   DEFAULT_TIME_SLOT_OPTIONS.map((slot) => ({
@@ -287,6 +199,15 @@ const parseTimeSlotEndMinutes = (slotLabel) => {
 };
 
 const isActiveAppointmentStatus = (status) => !['Completed', 'Cancelled'].includes(String(status || '').trim());
+
+const getAppointmentDateKey = (value) => {
+  if (!value) return '';
+  const parsed = typeof value === 'string' ? parseISO(value) : new Date(value);
+  if (isValid(parsed)) {
+    return format(parsed, 'yyyy-MM-dd');
+  }
+  return String(value).slice(0, 10);
+};
 
 const ConfirmationModal = ({
   isOpen,
@@ -673,9 +594,6 @@ export const BookingForm = ({
     chestXray: [],
     urinalysis: [],
   });
-  const [studentAcademicOptions, setStudentAcademicOptions] = useState(() =>
-    buildStudentAcademicOptions(),
-  );
   const submitLockRef = useRef(false);
   const isRescheduleMode = Boolean(rescheduleAppointment && onReschedule);
   const isStudentBookingUser = !isGuestUser && isStudentBookingUserType(user?.userType);
@@ -729,27 +647,6 @@ export const BookingForm = ({
       return normalizedSelectedDate;
     });
   }, [todayDateKey, hasUserSelectedDate]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadDepartmentOptions = async () => {
-      try {
-        const departments = await departmentService.getAcademicDepartments();
-        if (!isMounted) return;
-        setStudentAcademicOptions(buildStudentAcademicOptions(departments));
-      } catch {
-        if (!isMounted) return;
-        setStudentAcademicOptions(buildStudentAcademicOptions());
-      }
-    };
-
-    loadDepartmentOptions();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (user?.name || user?.program || user?.college || user?.department || user?.position || user?.userType === 'guest') {
@@ -808,31 +705,17 @@ export const BookingForm = ({
     });
   }, [isEmployeeBookingUser, isGuestUser, isRescheduleMode, isStudentBookingUser, rescheduleAppointment, user]);
 
-  const availableStudentPrograms = formData.college
-    ? (studentAcademicOptions.programsByCollege[formData.college] || [])
-    : [];
-
   useEffect(() => {
     if (!isStudentBookingUser) {
       return;
     }
 
-    if (formData.college && !studentAcademicOptions.colleges.includes(formData.college)) {
-      setFormData((prev) => ({ ...prev, college: '', program: '' }));
-      return;
+    const savedCollege = user?.college || '';
+    const savedProgram = user?.program || '';
+    if (formData.college !== savedCollege || formData.program !== savedProgram) {
+      setFormData((prev) => ({ ...prev, college: savedCollege, program: savedProgram }));
     }
-
-    if (!formData.college) {
-      if (formData.program) {
-        setFormData((prev) => ({ ...prev, program: '' }));
-      }
-      return;
-    }
-
-    if (!availableStudentPrograms.includes(formData.program)) {
-      setFormData((prev) => ({ ...prev, program: '' }));
-    }
-  }, [availableStudentPrograms, formData.college, formData.program, isStudentBookingUser, studentAcademicOptions.colleges]);
+  }, [formData.college, formData.program, isStudentBookingUser, user?.college, user?.program]);
 
   const serviceOptions = isGuestUser ? guestServices : services;
   const availablePurposes = getPurposeOptionsForSelection({
@@ -844,17 +727,7 @@ export const BookingForm = ({
     ? [EMPLOYEE_FIXED_SUBCATEGORY]
     : getAvailableSubcategoryOptions(formData.service);
   const isSingleSubcategoryOption = availableSubcategories.length === 1;
-  const employeeCollegeOptions = buildSingleValueOptions(formData.college, user?.college);
-  const employeeDepartmentOptions = buildSingleValueOptions(formData.department, user?.department, user?.program);
   const employeePositionOptions = buildSingleValueOptions(formData.position, user?.position);
-  const employeeTestingCollegeOptions = buildSingleValueOptions(
-    employeeCollegeOptions,
-    studentAcademicOptions.colleges,
-  );
-  const employeeTestingDepartmentOptions = buildSingleValueOptions(
-    employeeDepartmentOptions,
-    Object.values(studentAcademicOptions.programsByCollege).flat(),
-  );
   const employeeTestingPositionOptions = buildSingleValueOptions(
     employeePositionOptions,
     'Localhost Testing Only',
@@ -1031,12 +904,19 @@ export const BookingForm = ({
     ...section,
     slots: slotAvailability.filter((slot) => slot.session === section.key),
   }));
+  const selectedDateKey = format(date, 'yyyy-MM-dd');
+  const hasActiveAppointmentOnSelectedDate = (appointments || []).some(
+    (apt) =>
+      apt.id !== rescheduleAppointment?.id &&
+      getAppointmentDateKey(apt.date) === selectedDateKey &&
+      isActiveAppointmentStatus(apt.status),
+  );
 
   useEffect(() => {
     if (!formData.timeSlot) return;
-    if (!isSlotUnavailable(formData.timeSlot)) return;
+    if (!hasActiveAppointmentOnSelectedDate && !isSlotUnavailable(formData.timeSlot)) return;
     setFormData((prev) => ({ ...prev, timeSlot: '' }));
-  }, [formData.timeSlot, slotAvailability, date]);
+  }, [formData.timeSlot, slotAvailability, date, hasActiveAppointmentOnSelectedDate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1078,15 +958,14 @@ export const BookingForm = ({
       toast.error('The selected time slot is invalid.');
       return;
     }
-    const hasSameSlotConflict = (appointments || []).some(
+    const hasSameDayConflict = (appointments || []).some(
       (apt) =>
         apt.id !== rescheduleAppointment?.id &&
-        apt.date === selectedDate &&
-        apt.time === formData.timeSlot &&
+        getAppointmentDateKey(apt.date) === selectedDate &&
         isActiveAppointmentStatus(apt.status),
     );
-    if (hasSameSlotConflict) {
-      toast.error('You already have an appointment in that same date and time slot.');
+    if (hasSameDayConflict) {
+      toast.error(SAME_DAY_APPOINTMENT_MESSAGE);
       return;
     }
     if (isSlotUnavailable(formData.timeSlot)) {
@@ -1116,22 +995,6 @@ export const BookingForm = ({
           college: '',
           program: formData.guestType.trim(),
           pictureUrl: '',
-        });
-
-        if (profileResult?.user && typeof onUserUpdated === 'function') {
-          onUserUpdated(profileResult.user);
-        }
-      } else if (isStudentBookingUser) {
-        const profileResult = await profileService.updateProfile({
-          firstName: user?.firstName || '',
-          middleName: user?.middleName || '',
-          lastName: user?.lastName || '',
-          email: user?.email || '',
-          phone: user?.phone || '',
-          address: user?.address || '',
-          college: formData.college.trim(),
-          program: formData.program.trim(),
-          pictureUrl: user?.pictureUrl || '',
         });
 
         if (profileResult?.user && typeof onUserUpdated === 'function') {
@@ -1232,6 +1095,12 @@ export const BookingForm = ({
                 </div>
               ) : (
                 <div className="space-y-5">
+                  {hasActiveAppointmentOnSelectedDate && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-700">
+                      <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                      {SAME_DAY_APPOINTMENT_MESSAGE}
+                    </div>
+                  )}
                   {TIME_SLOT_SECTIONS.map((section) => {
                     const sectionSlots = groupedSlotAvailability.find((group) => group.key === section.key)?.slots || [];
                     const sectionSlotDefinitions = DEFAULT_TIME_SLOT_OPTIONS.filter((slot) => slot.session === section.key);
@@ -1260,7 +1129,7 @@ export const BookingForm = ({
                           ) : (
                             sectionSlots.map((slot) => {
                               const isPastCutoff = isSlotPastCutoff(slot.time);
-                              const isUnavailable = slot.remaining <= 0 || isPastCutoff;
+                              const isUnavailable = hasActiveAppointmentOnSelectedDate || slot.remaining <= 0 || isPastCutoff;
                               const isNearlyFull = slot.remaining <= Math.max(1, Math.ceil(slot.maxCapacity * 0.25));
 
                               return (
@@ -1278,12 +1147,18 @@ export const BookingForm = ({
                                   <span
                                     className={`text-xs font-bold px-3 py-1 rounded-full ${isPastCutoff
                                       ? 'bg-slate-200 text-slate-600'
+                                      : hasActiveAppointmentOnSelectedDate
+                                        ? 'bg-amber-100 text-amber-700'
                                       : isNearlyFull
                                         ? 'bg-red-100 text-red-600'
                                         : 'bg-emerald-100 text-emerald-600'
                                       }`}
                                   >
-                                    {isPastCutoff ? 'Not available' : `${slot.remaining} slots left`}
+                                    {isPastCutoff
+                                      ? 'Not available'
+                                      : hasActiveAppointmentOnSelectedDate
+                                        ? 'Already booked'
+                                        : `${slot.remaining} slots left`}
                                   </span>
                                 </button>
                               );
@@ -1362,17 +1237,9 @@ export const BookingForm = ({
                     <Building2 size={16} className="text-primary" />
                     College
                   </label>
-                  <select
-                    required
-                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
-                    value={formData.college}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value, program: '' }))}
-                  >
-                    <option value="" disabled>Select college</option>
-                    {studentAcademicOptions.colleges.map((college) => (
-                      <option key={college} value={college}>{college}</option>
-                    ))}
-                  </select>
+                  <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 font-medium text-slate-800">
+                    {formData.college || 'No college on file'}
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -1380,20 +1247,9 @@ export const BookingForm = ({
                     <GraduationCap size={16} className="text-primary" />
                     Department / Program
                   </label>
-                  <select
-                    required
-                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                    value={formData.program}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, program: e.target.value }))}
-                    disabled={!formData.college}
-                  >
-                    <option value="" disabled>
-                      {formData.college ? 'Select department / program' : 'Select a college first'}
-                    </option>
-                    {availableStudentPrograms.map((program) => (
-                      <option key={program} value={program}>{program}</option>
-                    ))}
-                  </select>
+                  <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 font-medium text-slate-800">
+                    {formData.program || 'No department / program on file'}
+                  </div>
                 </div>
               </>
             )}
@@ -1403,36 +1259,11 @@ export const BookingForm = ({
                 <div className="space-y-3">
                   <label className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
                     <GraduationCap size={16} className="text-primary" />
-                    Department
+                    Program / Department
                   </label>
-                  {isTestingEmployeeBookingUser ? (
-                    <>
-                      <input
-                        list="testing-employee-departments"
-                        className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
-                        value={formData.department}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
-                        placeholder="Enter department"
-                      />
-                      <datalist id="testing-employee-departments">
-                        {employeeTestingDepartmentOptions.map((department) => (
-                          <option key={department} value={department} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : (
-                    <select
-                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                      value={formData.department}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, department: e.target.value }))}
-                      disabled={employeeDepartmentOptions.length <= 1}
-                    >
-                      <option value="" disabled>No department on file</option>
-                      {employeeDepartmentOptions.map((department) => (
-                        <option key={department} value={department}>{department}</option>
-                      ))}
-                    </select>
-                  )}
+                  <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 font-medium text-slate-800">
+                    {formData.department || 'No department on file'}
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -1440,34 +1271,9 @@ export const BookingForm = ({
                     <Building2 size={16} className="text-primary" />
                     College
                   </label>
-                  {isTestingEmployeeBookingUser ? (
-                    <>
-                      <input
-                        list="testing-employee-colleges"
-                        className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium"
-                        value={formData.college}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
-                        placeholder="Enter college"
-                      />
-                      <datalist id="testing-employee-colleges">
-                        {employeeTestingCollegeOptions.map((college) => (
-                          <option key={college} value={college} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : (
-                    <select
-                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all bg-white font-medium disabled:bg-slate-50 disabled:text-slate-500"
-                      value={formData.college}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, college: e.target.value }))}
-                      disabled={employeeCollegeOptions.length <= 1}
-                    >
-                      <option value="" disabled>No college on file</option>
-                      {employeeCollegeOptions.map((college) => (
-                        <option key={college} value={college}>{college}</option>
-                      ))}
-                    </select>
-                  )}
+                  <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 font-medium text-slate-800">
+                    {formData.college || 'No college on file'}
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -1677,6 +1483,7 @@ export const BookingForm = ({
                 !formData.subcategory ||
                 !formData.purpose ||
                 !formData.timeSlot ||
+                hasActiveAppointmentOnSelectedDate ||
                 (isGuestUser && (!formData.patientName.trim() || !formData.guestType.trim())) ||
                 (isStudentBookingUser && (!formData.college.trim() || !formData.program.trim()))
               }

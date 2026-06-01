@@ -182,6 +182,20 @@ const QueueStatusBadge = ({ status, className = '' }) => {
   );
 };
 
+const ModalDetailItem = ({ icon: Icon, label, value, className = '', children }) => (
+  <div className={`min-w-0 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 ${className}`}>
+    <p className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+      {Icon && <Icon size={12} className="shrink-0" />}
+      <span className="truncate">{label}</span>
+    </p>
+    {children || (
+      <p className="break-words text-sm font-bold leading-snug text-slate-800">
+        {value || 'Not provided'}
+      </p>
+    )}
+  </div>
+);
+
 const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedule, onCancel }) => {
   if (!appointment) return null;
   const isGuestUser = user?.userType === 'guest';
@@ -194,231 +208,119 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
   const queueDisplayStatus = getAppointmentQueueDisplayStatus(appointment);
   const remarksOrMessage = String(appointment?.notes || '').trim();
   const cancellationReason = String(appointment?.cancellationReason || '').trim();
+  const serviceLabel = [appointment.service, appointment.subcategory].filter(Boolean).join(' - ') || 'No service recorded';
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-3 backdrop-blur-sm sm:p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-2xl sm:rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden relative my-4"
+            className="relative my-3 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
           >
-            <button 
-              onClick={onClose}
-              className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
-            >
-              <X size={24} />
-            </button>
-
-            <div className="bg-slate-50 p-4 sm:p-8 border-b border-slate-100">
-              <div className="flex items-center justify-between gap-4 mb-4">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-100">
+            <div className="shrink-0 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white shadow-sm">
                     <ServiceIcon service={appointment.service} />
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-slate-800">Appointment Details</h2>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-black text-slate-900 sm:text-lg">Appointment Details</h2>
+                    <p className="truncate text-sm font-bold text-slate-700">
+                      {appointment.patientName || 'Patient'}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       <StatusBadge status={appointment.status} cancellationReason={appointment.cancellationReason} />
                       <QueueStatusBadge status={queueDisplayStatus} />
                     </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+                  aria-label="Close appointment details"
+                >
+                  <X size={20} />
+                </button>
               </div>
             </div>
 
-            <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
-              <div className="flex items-center justify-between p-4 sm:p-6 bg-primary/5 rounded-2xl sm:rounded-3xl border border-dashed border-primary/20">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-white text-primary rounded-2xl shadow-sm">
-                    <Ticket size={24} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Ticket Number</p>
-                    <p className="text-2xl font-black text-slate-800 tracking-tight">{appointment.appointmentCode}</p>
-                  </div>
-                </div>
-                {(appointment.queueNumber || queueDisplayStatus) && (
-                  <div className="ml-4 text-right">
-                    {appointment.queueNumber && (
-                      <>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Queue Number
-                        </p>
-                        <p className="text-lg font-black text-slate-900">
-                          {appointment.queueNumber}
-                        </p>
-                      </>
-                    )}
-                    {queueDisplayStatus && (
-                      <div className="mt-2">
-                        <p className="mb-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Queue Status
-                        </p>
-                        <QueueStatusBadge status={queueDisplayStatus} />
-                      </div>
-                    )}
-                  </div>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <ModalDetailItem icon={Ticket} label="Ticket Number" value={appointment.appointmentCode} className="border-primary/15 bg-primary/5" />
+                {appointment.queueNumber && (
+                  <ModalDetailItem label="Queue Number" value={appointment.queueNumber} />
+                )}
+                {queueDisplayStatus && (
+                  <ModalDetailItem label="Queue Status">
+                    <QueueStatusBadge status={queueDisplayStatus} />
+                  </ModalDetailItem>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 gap-6">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                    <User size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase">Patient Name</p>
-                    <p className="font-bold text-slate-800">{appointment.patientName}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                      <Calendar size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Date</p>
-                      <p className="font-bold text-slate-800">{safeFormat(appointment.date, 'MMM d, yyyy')}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                      <Clock size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Time Slot</p>
-                      <p className="font-bold text-slate-800">{appointment.time}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                    <Tag size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase">Service & Subcategory</p>
-                    <p className="font-bold text-slate-800">{appointment.service} - {appointment.subcategory}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                    <ClipboardList size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase">Purpose</p>
-                    <p className="font-bold text-slate-800">{appointment.purpose}</p>
-                  </div>
-                </div>
-
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                <ModalDetailItem icon={User} label="Patient Name" value={appointment.patientName} />
+                <ModalDetailItem icon={Calendar} label="Date" value={safeFormat(appointment.date, 'MMM d, yyyy')} />
+                <ModalDetailItem icon={Clock} label="Time Slot" value={appointment.time} />
+                <ModalDetailItem icon={Tag} label="Service & Subcategory" value={serviceLabel} className="sm:col-span-2 lg:col-span-1" />
+                <ModalDetailItem icon={ClipboardList} label="Purpose" value={appointment.purpose} className="sm:col-span-2 lg:col-span-2" />
                 {isGuestUser && (
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                      <GraduationCap size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Type of Guest</p>
-                      <p className="font-bold text-slate-800">{guestType || 'Not provided'}</p>
-                    </div>
-                  </div>
+                  <ModalDetailItem icon={GraduationCap} label="Type of Guest" value={guestType || 'Not provided'} />
                 )}
-
-                {(showCollege || showProgram) && (
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {showCollege && (
-                      <div className="flex items-start gap-4">
-                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                          <Building2 size={18} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">College</p>
-                          <p className="font-bold text-slate-800">{user.college}</p>
-                        </div>
-                      </div>
-                    )}
-                    {showProgram && (
-                      <div className="flex items-start gap-4">
-                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                          <GraduationCap size={18} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">Department / Program</p>
-                          <p className="font-bold text-slate-800">{user.program}</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                {showCollege && (
+                  <ModalDetailItem icon={Building2} label="College" value={user.college} />
                 )}
-
+                {showProgram && (
+                  <ModalDetailItem icon={GraduationCap} label="Department / Program" value={user.program} />
+                )}
                 {isGuestUser && (
-                  <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                      <div className="space-y-3">
-                        <div className="flex items-start gap-3">
-                          <div className="p-2 bg-white rounded-lg text-primary shadow-sm">
-                            <IdCard size={18} />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase">Temporary ID</p>
-                            <p className="font-black text-slate-900">{tempIdentifier || 'Not available'}</p>
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          Present this temporary ID or QR code when checking in at the kiosk.
+                  <div className="rounded-xl border border-primary/10 bg-primary/5 p-3 sm:col-span-2 lg:col-span-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                      <div className="min-w-0">
+                        <p className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          <IdCard size={12} />
+                          Temporary ID
                         </p>
+                        <p className="break-words text-sm font-black text-slate-900">{tempIdentifier || 'Not available'}</p>
                       </div>
                       {user?.qrCode && (
-                        <div className="justify-self-center rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                          <img src={user.qrCode} alt="Temporary guest QR code" className="h-28 w-28 rounded-xl object-contain" />
+                        <div className="justify-self-start rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:justify-self-end">
+                          <img src={user.qrCode} alt="Temporary guest QR code" className="h-20 w-20 rounded-lg object-contain" />
                         </div>
                       )}
                     </div>
                   </div>
                 )}
-
                 {remarksOrMessage && (
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                      <FileText size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Remarks / Message</p>
-                      <p className="text-sm text-slate-600 italic">"{remarksOrMessage}"</p>
-                    </div>
-                  </div>
+                  <ModalDetailItem icon={FileText} label="Remarks / Message" className="sm:col-span-2 lg:col-span-3">
+                    <p className="max-h-24 overflow-y-auto whitespace-pre-wrap pr-1 text-sm font-semibold leading-relaxed text-slate-700">
+                      {remarksOrMessage}
+                    </p>
+                  </ModalDetailItem>
                 )}
-
                 {cancellationReason && (
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                      <Trash2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase">Cancellation / Void Reason</p>
-                      <p className="text-sm text-slate-600 italic">"{cancellationReason}"</p>
-                    </div>
-                  </div>
+                  <ModalDetailItem icon={Trash2} label="Cancellation / Void Reason" className="sm:col-span-2 lg:col-span-3">
+                    <p className="max-h-24 overflow-y-auto whitespace-pre-wrap pr-1 text-sm font-semibold leading-relaxed text-slate-700">
+                      {cancellationReason}
+                    </p>
+                  </ModalDetailItem>
                 )}
               </div>
 
-              <div className="pt-4 border-t border-slate-100">
-                <div className="flex items-start gap-3 text-sm text-slate-500">
-                  <MapPin size={16} className="text-slate-400 mt-0.5" />
-                  <p>ESSU MAIN INFIRMARY BUILDING</p>
-                </div>
+              <div className="flex items-start gap-2 border-t border-slate-100 pt-3 text-xs font-bold uppercase tracking-widest text-slate-500">
+                <MapPin size={14} className="mt-0.5 shrink-0 text-slate-400" />
+                <p>ESSU MAIN INFIRMARY BUILDING</p>
               </div>
 
               {(canReschedule || canCancel) && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   {canReschedule && (
                     <button
                       onClick={() => onReschedule(appointment)}
-                      className="w-full rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 font-semibold text-primary transition-colors hover:bg-primary/10"
+                      className="w-full rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
                     >
                       Reschedule Appointment
                     </button>
@@ -426,7 +328,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
                   {canCancel && (
                     <button
                       onClick={() => onCancel(appointment)}
-                      className="w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 font-semibold text-red-600 transition-colors hover:bg-red-100"
+                      className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
                     >
                       Cancel Appointment
                     </button>
@@ -436,7 +338,7 @@ const AppointmentDetailModal = ({ isOpen, appointment, onClose, user, onReschedu
 
               <button
                 onClick={onClose}
-                className="w-full py-4 bg-primary text-white font-bold rounded-2xl hover:bg-primary-hover transition-all shadow-lg shadow-primary/20"
+                className="w-full rounded-xl bg-primary py-3 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary-hover"
               >
                 Close Details
               </button>

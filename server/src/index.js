@@ -528,6 +528,7 @@ let cachedAppointmentStatuses = null;
 const DISPLAY_APPOINTMENT_STATUSES = ['Approved', 'Confirmed', 'Completed', 'Cancelled'];
 const ABSENCE_VOID_NOTIFICATION_MESSAGE = 'Your appointment was voided due to absence.';
 const ABSENCE_VOID_CANCELLATION_REASON = 'Voided due to absence because the user did not check in within the scheduled appointment time.';
+const SAME_DAY_APPOINTMENT_MESSAGE = 'You already have an appointment scheduled for this day. Multiple bookings on the same day are not allowed.';
 
 function parseAuthToken(token) {
   try {
@@ -3862,6 +3863,7 @@ app.get('/api/activity-logs', loadAuthenticatedUser, async (req, res) => {
 });
 
 app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
+  const requestBody = req.body || {};
   const firstName = normalizeIdentifier(req.body?.firstName);
   const middleName = normalizeIdentifier(req.body?.middleName);
   const lastName = normalizeIdentifier(req.body?.lastName);
@@ -3871,6 +3873,9 @@ app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
   const college = normalizeIdentifier(req.body?.college);
   const program = normalizeIdentifier(req.body?.program);
   const pictureUrl = typeof req.body?.pictureUrl === 'string' ? req.body.pictureUrl.trim() : '';
+  const canUpdateAcademicProfile = isGuestUserType(getEffectiveUserType(req.authUser));
+  const shouldUpdateCollege = canUpdateAcademicProfile && Object.prototype.hasOwnProperty.call(requestBody, 'college');
+  const shouldUpdateProgram = canUpdateAcademicProfile && Object.prototype.hasOwnProperty.call(requestBody, 'program');
 
   try {
     const { rows } = await pool.query(
@@ -3883,8 +3888,8 @@ app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
             phone = NULLIF($6, ''),
             address = NULLIF($7, ''),
             picture_url = NULLIF($8, ''),
-            college = NULLIF($9, ''),
-            program = NULLIF($10, '')
+            college = CASE WHEN $11 THEN NULLIF($9, '') ELSE college END,
+            program = CASE WHEN $12 THEN NULLIF($10, '') ELSE program END
         WHERE id = $1
         RETURNING
           id,
@@ -3918,6 +3923,8 @@ app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
         pictureUrl,
         college,
         program,
+        shouldUpdateCollege,
+        shouldUpdateProgram,
       ],
     );
 
@@ -4288,16 +4295,15 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
         FROM public.appointments
         WHERE user_id = $1
           AND appointment_date = $2
-          AND time_slot = $3
           AND cancelled_at IS NULL
-          AND status NOT IN ($4, $5)
+          AND status NOT IN ($3, $4)
         LIMIT 1
       `,
-      [req.authUser.id, date, timeSlot, completedStatus, cancelledStatus],
+      [req.authUser.id, date, completedStatus, cancelledStatus],
     );
 
     if (conflictingRows[0]) {
-      return res.status(409).json({ message: 'You already have an appointment in that same date and time slot.' });
+      return res.status(409).json({ message: SAME_DAY_APPOINTMENT_MESSAGE });
     }
 
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
@@ -4335,6 +4341,28 @@ app.post('/api/appointments', loadAuthenticatedUser, async (req, res) => {
 
       try {
         await client.query('BEGIN');
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+          [req.authUser.id, date],
+        );
+
+        const duplicateOnDate = await client.query(
+          `
+            SELECT id
+            FROM public.appointments
+            WHERE user_id = $1
+              AND appointment_date = $2
+              AND cancelled_at IS NULL
+              AND status NOT IN ($3, $4)
+            LIMIT 1
+          `,
+          [req.authUser.id, date, completedStatus, cancelledStatus],
+        );
+
+        if (duplicateOnDate.rows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ message: SAME_DAY_APPOINTMENT_MESSAGE });
+        }
 
         const inserted = await client.query(
           `
@@ -4526,17 +4554,16 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
         FROM public.appointments
         WHERE user_id = $1
           AND appointment_date = $2
-          AND time_slot = $3
           AND cancelled_at IS NULL
-          AND status NOT IN ($4, $5)
-          AND id <> $6
+          AND status NOT IN ($3, $4)
+          AND id <> $5
         LIMIT 1
       `,
-      [req.authUser.id, date, timeSlot, completedStatus, cancelledStatus, id],
+      [req.authUser.id, date, completedStatus, cancelledStatus, id],
     );
 
     if (conflictingRows[0]) {
-      return res.status(409).json({ message: 'You already have an appointment in that same date and time slot.' });
+      return res.status(409).json({ message: SAME_DAY_APPOINTMENT_MESSAGE });
     }
 
     const slotDefinition = await getOrCreateSlotDefinition(timeSlot);
@@ -4571,6 +4598,29 @@ app.patch('/api/appointments/:id/reschedule', loadAuthenticatedUser, async (req,
     let updatedRow;
     try {
       await client.query('BEGIN');
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+        [req.authUser.id, date],
+      );
+
+      const duplicateOnDate = await client.query(
+        `
+          SELECT id
+          FROM public.appointments
+          WHERE user_id = $1
+            AND appointment_date = $2
+            AND cancelled_at IS NULL
+            AND status NOT IN ($3, $4)
+            AND id <> $5
+          LIMIT 1
+        `,
+        [req.authUser.id, date, completedStatus, cancelledStatus, id],
+      );
+
+      if (duplicateOnDate.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ message: SAME_DAY_APPOINTMENT_MESSAGE });
+      }
 
       const updated = await client.query(
         `

@@ -218,6 +218,20 @@ const buildAppointmentsBySession = (appointments) => {
   return groupedAppointments;
 };
 
+const AppointmentInfoCell = ({ icon: Icon, label, value, className = '', children }) => (
+  <div className={`min-w-0 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 ${className}`}>
+    <p className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+      {Icon && <Icon size={12} className="shrink-0" />}
+      <span className="truncate">{label}</span>
+    </p>
+    {children || (
+      <p className="break-words text-sm font-bold leading-snug text-slate-800">
+        {value || 'Not provided'}
+      </p>
+    )}
+  </div>
+);
+
 const AppointmentDetailModal = ({ appointment, onClose }) => {
   if (!appointment) return null;
 
@@ -241,161 +255,73 @@ const AppointmentDetailModal = ({ appointment, onClose }) => {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-3 backdrop-blur-sm sm:p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 16 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 16 }}
-          className="w-full max-w-3xl bg-white rounded-[2rem] shadow-2xl overflow-hidden"
+          className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         >
-          <div className="flex items-center justify-between p-5 sm:p-6 border-b border-slate-100 bg-slate-50">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900">Appointment Details</h2>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">Review the full patient and appointment information.</p>
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white text-primary">
+                <User size={17} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-black text-slate-900 sm:text-lg">Appointment Details</h2>
+                <p className="truncate text-sm font-bold text-slate-700">
+                  {appointment.patientName || 'Anonymous'}
+                </p>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-white text-slate-400 hover:text-slate-700 transition-colors"
-            >
-              <X size={22} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {appointment.status && (
+                <span className="inline-flex max-w-[140px] truncate rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 sm:max-w-none">
+                  {getAppointmentStatusLabel(appointment.status, appointment.cancellationReason)}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+                aria-label="Close appointment details"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
-          <div className="p-5 sm:p-6 space-y-5">
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Patient</p>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-primary shrink-0">
-                    <User size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-800 truncate">{appointment.patientName || 'Anonymous'}</p>
-                    <p className="text-xs text-slate-500">Tap outside this window or the close button to return to the appointment list.</p>
-                  </div>
-                </div>
-                {appointment.status && (
-                  <span className="inline-flex px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-black text-slate-700 whitespace-nowrap">
-                    {getAppointmentStatusLabel(appointment.status, appointment.cancellationReason)}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200">
-                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Appointment Code</p>
-                  <p className="text-sm font-black text-primary">{appointment.appointmentCode || 'No code'}</p>
-                </div>
-
-                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">User Type</p>
-                  <p className="text-sm font-black text-slate-800">{userTypeLabel}</p>
-                </div>
-
-                {receiptIdentity.value && (
-                  <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                      <IdCard size={12} />
-                      {receiptIdentity.label}
-                    </p>
-                    <p className="text-sm font-black text-slate-800">{receiptIdentity.value}</p>
-                  </div>
-                )}
-
-                <div className="bg-white rounded-xl border border-slate-100 px-3 py-2.5">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                  <p className="text-sm font-black text-slate-800">{getAppointmentStatusLabel(appointment.status || 'Approved', appointment.cancellationReason)}</p>
-                </div>
-              </div>
-            </div>
-
-            {(showCollege || showProgram || showGuestType) && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {showCollege && (
-                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                      <Building2 size={12} />
-                      College
-                    </p>
-                    <p className="text-sm font-black text-slate-800">{college}</p>
-                  </div>
-                )}
-
-                {showProgram && (
-                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                      <GraduationCap size={12} />
-                      Program / Department
-                    </p>
-                    <p className="text-sm font-black text-slate-800">{program}</p>
-                  </div>
-                )}
-
-                {showGuestType && (
-                  <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                      <GraduationCap size={12} />
-                      Type of Guest
-                    </p>
-                    <p className="text-sm font-black text-slate-800">{guestType}</p>
-                  </div>
-                )}
-              </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-2.5 overflow-y-auto p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3">
+            <AppointmentInfoCell icon={User} label="Patient Name" value={appointment.patientName || 'Anonymous'} />
+            <AppointmentInfoCell label="Appointment Code" value={appointment.appointmentCode || 'No code'} />
+            <AppointmentInfoCell label="User Type" value={userTypeLabel} />
+            {receiptIdentity.value && (
+              <AppointmentInfoCell icon={IdCard} label={receiptIdentity.label} value={receiptIdentity.value} />
             )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <CalendarDays size={12} />
-                  Date
-                </p>
-                <p className="text-sm font-black text-slate-800">{safeFormat(appointment.date, 'MMMM d, yyyy')}</p>
-              </div>
-
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <Clock size={12} />
-                  Time
-                </p>
-                <p className="text-sm font-black text-slate-800">{appointment.time || 'No time provided'}</p>
-              </div>
-
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <Tag size={12} />
-                  Service
-                </p>
-                <p className="text-sm font-black text-slate-800">{appointment.service || 'No service provided'}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <Tag size={12} />
-                  Sub-category
-                </p>
-                <p className="text-sm font-black text-slate-800">{appointment.subcategory || 'No sub-category provided'}</p>
-              </div>
-
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <ClipboardList size={12} />
-                  Purpose
-                </p>
-                <p className="text-sm font-semibold text-slate-700">{appointment.purpose || 'No purpose provided'}</p>
-              </div>
-            </div>
-
+            <AppointmentInfoCell
+              label="Status"
+              value={getAppointmentStatusLabel(appointment.status || 'Approved', appointment.cancellationReason)}
+            />
+            <AppointmentInfoCell icon={CalendarDays} label="Date" value={safeFormat(appointment.date, 'MMMM d, yyyy')} />
+            <AppointmentInfoCell icon={Clock} label="Time" value={appointment.time || 'No time provided'} />
+            <AppointmentInfoCell icon={Tag} label="Service" value={appointment.service || 'No service provided'} />
+            <AppointmentInfoCell icon={Tag} label="Sub-category" value={appointment.subcategory || 'No sub-category provided'} />
+            {showCollege && (
+              <AppointmentInfoCell icon={Building2} label="College" value={college} />
+            )}
+            {showProgram && (
+              <AppointmentInfoCell icon={GraduationCap} label="Program / Department" value={program} />
+            )}
+            {showGuestType && (
+              <AppointmentInfoCell icon={GraduationCap} label="Type of Guest" value={guestType} />
+            )}
+            <AppointmentInfoCell icon={ClipboardList} label="Purpose" value={appointment.purpose || 'No purpose provided'} className="sm:col-span-2 lg:col-span-3" />
             {remarks && (
-              <div className="bg-white rounded-2xl p-4 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <FileText size={12} />
-                  Remarks
+              <AppointmentInfoCell icon={FileText} label="Remarks" className="sm:col-span-2 lg:col-span-3">
+                <p className="max-h-24 overflow-y-auto whitespace-pre-wrap pr-1 text-sm font-semibold leading-relaxed text-slate-700">
+                  {remarks}
                 </p>
-                <p className="text-sm font-semibold text-slate-700 whitespace-pre-wrap">{remarks}</p>
-              </div>
+              </AppointmentInfoCell>
             )}
           </div>
         </motion.div>
