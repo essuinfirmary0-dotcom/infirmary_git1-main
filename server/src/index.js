@@ -376,8 +376,8 @@ function resolveEmployeePosition(user) {
 }
 
 function resolveEmployeeDepartment(user) {
-  return normalizeIdentifier(user?.faculty_department)
-    || normalizeIdentifier(user?.program)
+  return normalizeIdentifier(user?.program)
+    || normalizeIdentifier(user?.faculty_department)
     || normalizeIdentifier(user?.faculty_college)
     || normalizeIdentifier(user?.college)
     || '';
@@ -623,7 +623,7 @@ function buildUserPayload(user) {
     employeeNumber: null,
     college: studentUser
       ? normalizeIdentifier(user.college) || normalizeIdentifier(user.faculty_college) || ''
-      : normalizeIdentifier(user.faculty_college) || normalizeIdentifier(user.college) || '',
+      : normalizeIdentifier(user.college) || normalizeIdentifier(user.faculty_college) || '',
     program: studentUser
       ? normalizeIdentifier(user.program) || ''
       : normalizeIdentifier(user.program) || normalizeIdentifier(user.faculty_department) || '',
@@ -3873,9 +3873,8 @@ app.patch('/api/auth/profile', loadAuthenticatedUser, async (req, res) => {
   const college = normalizeIdentifier(req.body?.college);
   const program = normalizeIdentifier(req.body?.program);
   const pictureUrl = typeof req.body?.pictureUrl === 'string' ? req.body.pictureUrl.trim() : '';
-  const canUpdateAcademicProfile = isGuestUserType(getEffectiveUserType(req.authUser));
-  const shouldUpdateCollege = canUpdateAcademicProfile && Object.prototype.hasOwnProperty.call(requestBody, 'college');
-  const shouldUpdateProgram = canUpdateAcademicProfile && Object.prototype.hasOwnProperty.call(requestBody, 'program');
+  const shouldUpdateCollege = Object.prototype.hasOwnProperty.call(requestBody, 'college');
+  const shouldUpdateProgram = Object.prototype.hasOwnProperty.call(requestBody, 'program');
 
   try {
     const { rows } = await pool.query(

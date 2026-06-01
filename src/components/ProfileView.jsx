@@ -2,9 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   User,
-  Mail,
-  Phone,
-  MapPin,
   ShieldCheck,
   Maximize2,
   Download,
@@ -46,17 +43,19 @@ const buildProfileForm = (user = {}) => ({
   email: user?.email || '',
   phone: user?.phone || '',
   address: user?.address || '',
+  college: user?.college || '',
+  program: user?.department || user?.program || '',
   pictureUrl: user?.pictureUrl || '',
 });
 
-const ProfileInfoItem = ({ icon: Icon, label, value, fullWidth = false }) => (
-  <div className={`flex items-start gap-4 rounded-2xl bg-slate-50 p-4 ${fullWidth ? 'md:col-span-2' : ''}`}>
-    <div className="rounded-lg bg-white p-2 text-primary shadow-sm">
-      <Icon size={18} />
-    </div>
-    <div className="min-w-0">
-      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="break-words text-sm font-semibold text-slate-800">{value || 'Not set'}</p>
+const ProfileReadonlyField = ({ label, value, icon: Icon }) => (
+  <div className="space-y-1.5">
+    <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.08em] text-slate-500">
+      {Icon && <Icon size={14} className="text-primary" />}
+      {label}
+    </span>
+    <div className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 font-semibold text-slate-700">
+      {value || 'Not set'}
     </div>
   </div>
 );
@@ -285,12 +284,6 @@ export const ProfileView = ({ user, onUserUpdated }) => {
   const identityInfo = getRoleIdentityInfo(user);
   const isGuestUser = identityInfo.isGuestUser;
   const profileFieldDisabled = !isEditingProfile || profileLoading || profileImageLoading;
-  const personalCollege = identityInfo.isEmployeeUser ? (user?.college || '') : identityInfo.college;
-  const personalProgram = identityInfo.isEmployeeUser
-    ? identityInfo.department
-    : isGuestUser
-      ? (user?.program || '')
-      : identityInfo.program;
   const personalProgramLabel = isGuestUser ? 'Type of Guest' : 'Program / Department';
   const personalIdentifierLabel = identityInfo.isEmployeeUser
     ? 'Employee Email'
@@ -380,6 +373,9 @@ export const ProfileView = ({ user, onUserUpdated }) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ProfileReadonlyField icon={ShieldCheck} label="User Type" value={userTypeLabel} />
+              <ProfileReadonlyField icon={IdCard} label={personalIdentifierLabel} value={personalIdentifierValue} />
+
               <div className="md:col-span-2 flex flex-col sm:flex-row items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                 <div className="w-20 h-20 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center overflow-hidden">
                   <img
@@ -446,7 +442,7 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                 />
               </label>
               <label className="space-y-1.5">
-                <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Email</span>
+                <span className="text-xs font-black text-slate-500 uppercase tracking-[0.08em]">Email Address</span>
                 <input
                   type="email"
                   value={profileForm.email}
@@ -473,6 +469,32 @@ export const ProfileView = ({ user, onUserUpdated }) => {
                   onChange={(e) => updateProfileField('address', e.target.value)}
                   disabled={profileFieldDisabled}
                   className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.08em] text-slate-500">
+                  <Building2 size={14} className="text-primary" />
+                  College
+                </span>
+                <input
+                  type="text"
+                  value={profileForm.college}
+                  onChange={(e) => updateProfileField('college', e.target.value)}
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.08em] text-slate-500">
+                  <GraduationCap size={14} className="text-primary" />
+                  {personalProgramLabel}
+                </span>
+                <input
+                  type="text"
+                  value={profileForm.program}
+                  onChange={(e) => updateProfileField('program', e.target.value)}
+                  disabled={profileFieldDisabled}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                 />
               </label>
             </div>
@@ -561,22 +583,6 @@ export const ProfileView = ({ user, onUserUpdated }) => {
             )}
           </form>
 
-          <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm border border-slate-200 space-y-4 sm:space-y-6 min-w-0 overflow-hidden">
-            <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
-              <User size={20} className="text-primary shrink-0" /> Personal Information
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <ProfileInfoItem icon={ShieldCheck} label="User Type" value={userTypeLabel} />
-              <ProfileInfoItem icon={IdCard} label={personalIdentifierLabel} value={personalIdentifierValue} />
-              {!isGuestUser && (
-                <ProfileInfoItem icon={Building2} label="College" value={personalCollege} />
-              )}
-              <ProfileInfoItem icon={GraduationCap} label={personalProgramLabel} value={personalProgram} />
-              <ProfileInfoItem icon={Mail} label="Email Address" value={user?.email || ''} />
-              <ProfileInfoItem icon={Phone} label="Phone Number" value={user?.phone || ''} />
-              <ProfileInfoItem icon={MapPin} label="Address" value={user?.address || ''} fullWidth />
-            </div>
-          </div>
         </div>
 
         <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm border border-slate-200 space-y-3">
